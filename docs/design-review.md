@@ -25,14 +25,14 @@ GroupDock の土台が、Swift の標準的な作りと、このアプリの思�
 
 ## 直す順番（リスクの低い順・各段でテストと実機確認）
 
-1. **文言と死んだ項目**（8 の①②④⑤）：挙動を変えないので安全。
-2. **保存先の注入**（6）：`tests/run.sh` の python 書き換えをやめる。
-3. **保存を `Persistence` へ**（1 の一部、5）：保存の失敗を 1 か所で扱う。
-4. **メニュー・ドラッグ・自動で隠すを `DockWindowController` から分ける**（2）。
-5. **`@MainActor` の付与と、裏の処理の集約**（3）。
-6. **`@Observable` への移行**（4）。
-7. **テストの分割と `Package.swift`**（7）。
-8. **文字サイズの定義**（8 の③）。
-9. **公開版の更新手順**（9）。
+1. **文言と死んだ項目**（8 の①②④⑤）：済。
+2. **保存先の注入**（6）：済（`Store.directoryOverride`）。
+3. **保存を `Persistence` へ**（1 の一部、5）：済。失敗は記録し、続けて 3 回失敗したときだけ画面に出す。
+4. **メニュー・ドラッグを `DockWindowController` から分ける**（2）：済（`DockMenus.swift`・`DockDrag.swift`）。自動で隠す判定は未分離。
+5. **`@MainActor` の付与**（3）：一部済。`DockWindowController` と `AppDelegate` に付けた（警告 0）。他の UI 型と、裏の処理の集約は未着手。
+6. **`@Observable` への移行**（4）：`NowPlayingState` と `ClipboardStore` は済。`Store` は**見送りと決定**（オーナーの回答）。効果は再描画の削減だけで、壊れると帯の再配置とドラッグが止まるため。理由：帯の再配置（`relayout`）が `store.objectWillChange`「何か 1 つでも変わったら」を拍にしていて、`@Observable` には同じ拍が無い。移すには、再配置の入力を明示して `withObservationTracking` で購読し直す設計変更になり、ビュー 20 か所超も書き換わる。
+7. **テストの分割**（7）：済。`tests/main.swift` から 4 ファイル（`GaugeTests`・`UiTextTests`・`ClipboardSecurityTests`・`PersistenceTests`）へ分けた（PASS 838 件のまま不変）。`Package.swift`（`swift test`）は未着手：`main.swift` が最上位の共有変数を使うため、残りの分割に関数化が要る。
+8. **文字サイズの定義**（8 の③）：済（`Typo`）。
+9. **公開版の更新手順**（9）：済（`.build/publish.sh`）。
 
 4〜6 は影響が広く、実機でしか確かめられない見た目や操作（ドラッグ、右クリック、自動で隠す）に触れる。1 段ごとに、反映して使ってから次へ進む。

@@ -406,6 +406,7 @@ final class MenuAction: NSObject {
     init(_ run: @escaping () -> Void) { self.run = run }
 }
 
+@MainActor
 final class DockWindowController: NSObject {
     // メニューの組み立て（DockMenus.swift）から使うものは、private を付けない。
     let store: Store
@@ -931,14 +932,17 @@ final class DockWindowController: NSObject {
         if let current = mouseTimer, abs(current.timeInterval - interval) < 0.001 { return }
         mouseTimer?.invalidate()
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.updateAutoHide()
-            self.updateHoverLabel()
-            // 帯から離れていて、自動で隠さない設定なら、判定を 0.5 秒に落とす。
-            let mouse = NSEvent.mouseLocation
-            let near = self.panel.frame.insetBy(dx: -40, dy: -40).contains(mouse)
-                || (self.bubble.isShown && self.bubble.frame.insetBy(dx: -40, dy: -40).contains(mouse))
-            self.restartMouseTimer(interval: PollPolicy.hoverInterval(autoHide: self.store.prefs.autoHide, mouseNear: near))
+            // メインの RunLoop で動くので、主スレッドであることを明示する。
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.updateAutoHide()
+                self.updateHoverLabel()
+                // 帯から離れていて、自動で隠さない設定なら、判定を 0.5 秒に落とす。
+                let mouse = NSEvent.mouseLocation
+                let near = self.panel.frame.insetBy(dx: -40, dy: -40).contains(mouse)
+                    || (self.bubble.isShown && self.bubble.frame.insetBy(dx: -40, dy: -40).contains(mouse))
+                self.restartMouseTimer(interval: PollPolicy.hoverInterval(autoHide: self.store.prefs.autoHide, mouseNear: near))
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         mouseTimer = timer

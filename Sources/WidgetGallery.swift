@@ -124,13 +124,13 @@ struct WidgetGallery: View {
                 RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.08))
                 VStack(spacing: 2) {
                     Image(systemName: def.symbol)
-                    Text(def.title).font(.system(size: 10))
+                    Text(def.title).font(.system(size: Typo.label))
                 }
             }
             .frame(height: 64)
 
             Text(def.id)
-                .font(.system(size: 8))
+                .font(.system(size: Typo.tiny))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Button("追加") {
@@ -196,33 +196,33 @@ struct WidgetGallery: View {
                     .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                 Image(systemName: kind.symbol)
-                    .font(.system(size: 14))
+                    .font(.system(size: Typo.symbolSmall))
                     .foregroundStyle(.secondary)
             }
             .frame(width: 44, height: 44)
         case .clock, .date:
             VStack(spacing: 2) {
-                Image(systemName: kind.symbol).font(.system(size: 18))
+                Image(systemName: kind.symbol).font(.system(size: Typo.glyph))
                 Text(kind == .clock ? "12:34" : "1/1(月)")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: Typo.label, weight: .semibold))
                     .monospacedDigit()
             }
         case .brightness:
             // 明るさの見本：太陽と、明るさを示す棒。
             VStack(spacing: 3) {
-                Image(systemName: kind.symbol).font(.system(size: 18))
+                Image(systemName: kind.symbol).font(.system(size: Typo.glyph))
                 Capsule().fill(Color.yellow.opacity(0.8)).frame(width: 30, height: 4)
             }
         case .microphone:
             // マイクの見本：マイクと、入力の強さを示す棒。
             VStack(spacing: 3) {
-                Image(systemName: kind.symbol).font(.system(size: 18))
+                Image(systemName: kind.symbol).font(.system(size: Typo.glyph))
                 Capsule().fill(Color.accentColor.opacity(0.7)).frame(width: 30, height: 4)
             }
         case .clipboard:
             // 履歴の見本：クリップボードと、積み重なった行。
             VStack(spacing: 3) {
-                Image(systemName: kind.symbol).font(.system(size: 18))
+                Image(systemName: kind.symbol).font(.system(size: Typo.glyph))
                 VStack(spacing: 2) {
                     ForEach([30.0, 22, 26], id: \.self) { width in
                         Capsule().fill(Color.primary.opacity(0.25)).frame(width: width, height: 3)
@@ -231,8 +231,8 @@ struct WidgetGallery: View {
             }
         case .calendar, .nowPlaying, .volume, .custom:
             VStack(spacing: 3) {
-                Image(systemName: kind.symbol).font(.system(size: 20))
-                Text(kind.title).font(.system(size: 10))
+                Image(systemName: kind.symbol).font(.system(size: Typo.glyphLarge))
+                Text(kind.title).font(.system(size: Typo.label))
             }
         }
     }

@@ -97,13 +97,13 @@ struct DockView: View {
         let name = section == .widgets ? "ウィジェット" : "アプリ"
         func arrow(_ symbol: String, _ delta: Int, _ help: String) -> some View {
             Button { store.setPage(section, StripPaging.turned(page: page, count: count, by: delta)) } label: {
-                Image(systemName: symbol).font(.system(size: 9, weight: .bold)).frame(maxWidth: .infinity, maxHeight: .infinity)
+                Image(systemName: symbol).font(.system(size: Typo.caption, weight: .bold)).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(help)
         }
-        let label = Text("\(page + 1)/\(count)").font(.system(size: 9, weight: .semibold)).monospacedDigit()
+        let label = Text("\(page + 1)/\(count)").font(.system(size: Typo.caption, weight: .semibold)).monospacedDigit()
         return SwiftUI.Group {
             if vertical {
                 VStack(spacing: 0) {
@@ -262,7 +262,7 @@ struct WidgetTile: View {
             }
             if widget.showLabel, store.prefs.showNames {
                 Text(label)
-                    .font(.system(size: 10))
+                    .font(.system(size: Typo.label))
                     .lineLimit(1)
                     .frame(width: width + 2)
             }
@@ -410,7 +410,7 @@ struct GroupTile: View {
                 }
             if hasRunning { RunningDot() } else { Color.clear.frame(width: 5, height: 5) }
             if store.prefs.showNames {
-                EditableGroupName(name: $group.name, font: .system(size: 10),
+                EditableGroupName(name: $group.name, font: .system(size: Typo.label),
                                   width: StripLayout.nameWidth(size), alignment: .center)
             }
         }
@@ -530,7 +530,7 @@ struct GroupBubbleView: View {
                 }
                 Button { store.addAppsTo(group.id) } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 16))
+                        .font(.system(size: Typo.symbol))
                         .frame(width: StripLayout.imageSide(size), height: StripLayout.imageSide(size))
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.07)))
                 }

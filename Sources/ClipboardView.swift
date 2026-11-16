@@ -3,7 +3,7 @@ import SwiftUI
 
 /// クリップボード履歴のポップアップ。一覧からクリックでコピーし直し、固定・削除・一時停止・すべて消すができる。
 struct ClipboardPopup: View {
-    @ObservedObject var clipboard: ClipboardStore
+    @Bindable var clipboard: ClipboardStore
     var onClose: () -> Void
 
     var body: some View {
@@ -52,7 +52,7 @@ struct ClipboardPopup: View {
 
 /// 履歴の 1 行。押すとクリップボードへ入れ直す。右の印で固定、×で削除。
 struct ClipboardRow: View {
-    @ObservedObject var clipboard: ClipboardStore
+    var clipboard: ClipboardStore
     let entry: ClipEntry
     var onCopied: () -> Void
     @State private var hovering = false

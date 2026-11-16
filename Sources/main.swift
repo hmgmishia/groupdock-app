@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let store = Store()
     private var settings: SettingsWindowController!
@@ -28,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         groupSettings = GroupSettingsWindowController(store: store)
         NotificationCenter.default.addObserver(forName: .groupDockOpenGroupSettings, object: nil, queue: .main) { [weak self] note in
             guard let id = note.object as? UUID else { return }
-            self?.groupSettings.show(groupID: id)
+            MainActor.assumeIsolated { self?.groupSettings.show(groupID: id) }   // queue: .main なので主スレッド
         }
         rebuildDocks()
 
@@ -64,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.rebuildDocks()
+            MainActor.assumeIsolated { self?.rebuildDocks() }   // queue: .main なので主スレッド
         }
 
         // 設定が変わったら Dock の表示にも反映する。
@@ -120,14 +121,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             object: nil,
             queue: .main
         ) { [weak self] note in
-            self?.announce(note, launched: true)
+            MainActor.assumeIsolated { self?.announce(note, launched: true) }   // queue: .main なので主スレッド
         }
         center.addObserver(
             forName: NSWorkspace.didTerminateApplicationNotification,
             object: nil,
             queue: .main
         ) { [weak self] note in
-            self?.announce(note, launched: false)
+            MainActor.assumeIsolated { self?.announce(note, launched: false) }
         }
     }
 
@@ -294,7 +295,7 @@ if SingleInstance.anotherIsRunning() {
 }
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
+let delegate = MainActor.assumeIsolated { AppDelegate() }   // 最上位のコードは主スレッドで動く
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()

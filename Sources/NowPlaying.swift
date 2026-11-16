@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Observation
 
 /// 「再生中」ウィジェットの取得・操作・解釈。UI を含まない（テストできる）。
 ///
@@ -144,10 +145,12 @@ struct PlaybackInfo: Equatable {
 }
 
 /// 再生状態。Store とは別の入れ物にして、毎回の更新で帯全体を描き直さない。
-final class NowPlayingState: ObservableObject {
-    @Published var info: PlaybackInfo?
+/// `@Observable`：ビューが読んだ値（`info`・`hint`）だけが再描画のきっかけになる。
+@Observable
+final class NowPlayingState {
+    var info: PlaybackInfo?
     /// 読めなかった理由のヒント（ブラウザの許可など）。
-    @Published var hint: String?
+    var hint: String?
 }
 
 // MARK: - MediaRemote（private framework。条件は SECURITY.md の「内部 API」）

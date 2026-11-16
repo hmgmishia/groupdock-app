@@ -1,5 +1,6 @@
 import AppKit
 import CryptoKit
+import Observation
 
 // ドラッグ＆ドロップのロジックだけを確かめる（UI は通さない）。
 // 保存先はテスト用のフォルダへ差し替える（実データに触れない）。差し替え先が無ければ、止まる。
@@ -2186,181 +2187,16 @@ do {
     check("戻すと FinderOpen も戻る", FinderOpen.newWindow == false)
 }
 
-// 保存と読み込みの集約（Persistence）：失敗の扱いを 1 か所にする。保存先はテスト用のフォルダ。
-do {
-    struct Sample: Codable, Equatable { var name: String; var count: Int }
-    let dir = Store.directory.appendingPathComponent("persistence-test", isDirectory: true)
-    let url = dir.appendingPathComponent("sample.json")
-    try? FileManager.default.removeItem(at: dir)
 
-    check("まだ無いファイルは、読み込みで nil", Persistence.load(Sample.self, from: url) == nil)
-    check("保存できる（フォルダも作る）", Persistence.save(Sample(name: "a", count: 1), to: url) == nil)
-    check("保存したものを読み直せる", Persistence.load(Sample.self, from: url) == Sample(name: "a", count: 1))
-    check("上書きできる", Persistence.save(Sample(name: "b", count: 2), to: url) == nil
-          && Persistence.load(Sample.self, from: url) == Sample(name: "b", count: 2))
-    try? Data("これは JSON ではない".utf8).write(to: url)
-    check("壊れたファイルは、読み込みで nil（落ちない）", Persistence.load(Sample.self, from: url) == nil)
-    // 書けない場所：ファイルの下にフォルダは作れない。
-    let blocked = url.appendingPathComponent("child.json")
-    check("書けない場所では、エラーを返す（落ちない）", Persistence.save(Sample(name: "c", count: 3), to: blocked) != nil)
-    try? FileManager.default.removeItem(at: dir)
 
-    // 失敗の記録：続けて失敗したときだけ、利用者に知らせる（1 回の失敗では騒がない）。
-    var tracker = SaveFailureTracker()
-    check("1 回目の失敗では知らせない", tracker.record(failed: true, key: "groups") == false)
-    check("2 回目でも知らせない", tracker.record(failed: true, key: "groups") == false)
-    check("3 回続けて失敗したら知らせる", tracker.record(failed: true, key: "groups") == true)
-    check("知らせたあとは、続けて失敗しても繰り返さない", tracker.record(failed: true, key: "groups") == false)
-    check("成功すれば数え直す", tracker.record(failed: false, key: "groups") == false)
-    check("数え直したあとは、また 3 回続けば知らせる",
-          [true, true, true].map { tracker.record(failed: $0, key: "groups") } == [false, false, true])
-    check("保存先ごとに別々に数える",
-          tracker.record(failed: true, key: "kept") == false && tracker.record(failed: true, key: "kept") == false
-          && tracker.record(failed: true, key: "kept") == true)
-}
 
-// ゲージ上のホイール調整：音量・マイク・明るさを、詳細を開かずに調整する。値の計算は純粋関数。
-do {
-    check("上へ回すと上がる（普通のマウス）", GaugeWheel.next(current: 50, deltaY: 1, precise: false) == 52)
-    check("下へ回すと下がる", GaugeWheel.next(current: 50, deltaY: -1, precise: false) == 48)
-    check("0 未満にならない", GaugeWheel.next(current: 1, deltaY: -10, precise: false) == 0)
-    check("100 を超えない", GaugeWheel.next(current: 99, deltaY: 10, precise: false) == 100)
-    check("トラックパッド（細かい量）は、小さく動く", GaugeWheel.next(current: 50, deltaY: 3, precise: true) == 51)
-    check("ごく小さな量でも、少なくとも 1 動く（止まらない）", GaugeWheel.next(current: 50, deltaY: 0.1, precise: true) == 51)
-    check("動かないとき（量 0）は、そのまま", GaugeWheel.next(current: 50, deltaY: 0, precise: true) == 50)
-    check("一度に動く量は 10 まで（勢いよく回しても急に変わらない）", GaugeWheel.next(current: 50, deltaY: 100, precise: false) == 60)
-    check("音量・マイク・明るさは、ホイールで調整できる",
-          [WidgetKind.volume, .microphone, .brightness].allSatisfy { GaugeWheel.adjustable($0) })
-    check("他の数値（CPU・メモリなど）は、調整できない",
-          ![WidgetKind.cpu, .memory, .disk, .battery, .clock, .nowPlaying].contains { GaugeWheel.adjustable($0) })
-}
 
-// 音量・マイク・明るさのポップアップ：文言を短くして改行し、幅を抑える（大きすぎた）。
-do {
-    check("ポップアップの幅は 220 以下", PopupLayout.width <= 220)
-    for subject in ["デバイス", "ディスプレイ"] {
-        for pinned in [true, false] {
-            let note = PopupLayout.pinnedNote(pinned: pinned, subject: subject)
-            check("\(subject) の説明（固定 \(pinned)）は 1 行 24 文字以内", note.split(separator: "\n").allSatisfy { $0.count <= 24 })
-            check("\(subject) の説明（固定 \(pinned)）は 3 行以内", note.split(separator: "\n").count <= 3)
-        }
-    }
-    check("接続されていない説明も、改行されて短い",
-          PopupLayout.unavailableNote(name: "とても長い名前の AirPods Pro").split(separator: "\n").allSatisfy { $0.count <= 24 })
-}
 
-// ホイール調整の競合：イベントごとに並行して「読む→計算→書く」をすると、取りこぼし・順序の逆転が起きる。
-// 量を足し合わせ、書く直前に 1 回だけ取り出す（GaugeAdjuster）。
-do {
-    var adjuster = GaugeAdjuster()
-    adjuster.add(deltaY: 1, precise: false)
-    adjuster.add(deltaY: 1, precise: false)
-    adjuster.add(deltaY: 1, precise: false)
-    check("溜めた量を、まとめて 1 回で取り出せる", adjuster.take(current: 50) == 56)
-    check("取り出したあとは、溜まりが空（同じ量を二重に書かない）", adjuster.take(current: 56) == nil)
-    adjuster.add(deltaY: 1, precise: false)
-    adjuster.add(deltaY: -1, precise: false)
-    check("上と下が打ち消し合えば、書かない", adjuster.take(current: 50) == nil)
-    adjuster.add(deltaY: 100, precise: false)
-    adjuster.add(deltaY: 100, precise: false)
-    check("溜めても、一度に動く量は上限まで（急に変わらない）", adjuster.take(current: 50) == 60)
-    adjuster.add(deltaY: -100, precise: false)
-    check("0 を下回らない", adjuster.take(current: 3) == 0)
-    adjuster.add(deltaY: 3, precise: true)
-    adjuster.add(deltaY: 3, precise: true)
-    check("トラックパッドの細かい量も足し合わせる", adjuster.take(current: 50) == 52)
-    // 書き込み中に来た量は、次の書き込みへ回る（落とさない）。
-    adjuster.add(deltaY: 1, precise: false)
-    let first = adjuster.take(current: 50)
-    adjuster.add(deltaY: 1, precise: false)
-    check("取り出し後に来た量は、次の取り出しで使われる", first == 52 && adjuster.take(current: 52) == 54)
-    check("溜まりが無いときは、読みに行く必要が無い", { var empty = GaugeAdjuster(); return empty.hasPending == false }())
-    check("溜まりが有れば、読みに行く", { var a = GaugeAdjuster(); a.add(deltaY: 1, precise: false); return a.hasPending }())
-}
 
-// グループ名の確定：前後の空白を除き、空なら元の名前に戻す。長すぎる名前は切る。
-do {
-    check("前後の空白を除く", GroupName.commit("  仕事  ", previous: "A") == "仕事")
-    check("空にしたら元の名前に戻す", GroupName.commit("", previous: "仕事") == "仕事")
-    check("空白だけでも元の名前に戻す", GroupName.commit("   \n", previous: "仕事") == "仕事")
-    check("改行は空白にして 1 行にする", GroupName.commit("a\nb", previous: "x") == "a b")
-    check("長すぎる名前は 40 文字で切る", GroupName.commit(String(repeating: "あ", count: 60), previous: "x").count == 40)
-    check("そのままの名前はそのまま", GroupName.commit("開発", previous: "x") == "開発")
-}
 
-// クリップボードのセキュリティ：印の無い秘密（鍵・トークン・カード番号・パスワード状）と、パスワード管理アプリからのコピーを保存しない。
-do {
-    check("秘密鍵のブロックは秘密", ClipboardPolicy.looksSecret("-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----"))
-    check("GitHub のトークンは秘密", ClipboardPolicy.looksSecret("ghp_" + String(repeating: "a", count: 36)))
-    check("AWS のアクセスキーは秘密", ClipboardPolicy.looksSecret("AKIAIOSFODNN7EXAMPLE"))
-    check("sk- で始まる API キーは秘密", ClipboardPolicy.looksSecret("sk-" + String(repeating: "A1b2", count: 8)))
-    check("JWT は秘密", ClipboardPolicy.looksSecret("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"))
-    check("Luhn を満たすカード番号は秘密", ClipboardPolicy.looksSecret("4111 1111 1111 1111"))
-    check("Luhn を満たさない数字は秘密でない", !ClipboardPolicy.looksSecret("4111111111111112"))
-    check("パスワード状（記号・大小・数字）は秘密", ClipboardPolicy.looksSecret("Tr0ub4dor&3xyz"))
-    check("ふつうの文は秘密でない", !ClipboardPolicy.looksSecret("明日の会議は 10 時からです"))
-    check("英文は秘密でない", !ClipboardPolicy.looksSecret("hello world"))
-    check("URL は秘密でない", !ClipboardPolicy.looksSecret("https://example.com/Path1?a=B2"))
-    check("パスは秘密でない", !ClipboardPolicy.looksSecret("/Users/me/Documents/Report2024"))
-    check("メールアドレスは秘密でない", !ClipboardPolicy.looksSecret("John.Doe1@example.com"))
-    check("識別子は秘密でない（記号なし）", !ClipboardPolicy.looksSecret("ClipboardPolicy2"))
-    check("パスワード管理アプリからのコピーは保存しない",
-          !ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text"], sourceBundleID: "com.1password.1password"))
-    check("Keychain Access からのコピーは保存しない",
-          !ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text"], sourceBundleID: "com.apple.keychainaccess"))
-    check("ふつうのアプリからのコピーは保存する",
-          ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text"], sourceBundleID: "com.apple.Safari"))
-    check("コピー元が分からなくても、印が無ければ保存する", ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text"], sourceBundleID: nil))
-    check("秘密に見えるテキストは、履歴の 1 件にしない", ClipboardParse.text("ghp_" + String(repeating: "a", count: 36)) == nil)
-    check("ふつうのテキストは、履歴の 1 件になる", ClipboardParse.text("議事録") != nil)
-    // 既に履歴にある分の掃除（固定したものは、利用者が選んだので残す）。
-    let secret = ClipEntry(kind: .text, text: "AKIAIOSFODNN7EXAMPLE", fingerprint: "text:AKIAIOSFODNN7EXAMPLE")
-    let plain = ClipEntry(kind: .text, text: "議事録", fingerprint: "text:議事録")
-    var pinnedSecret = ClipEntry(kind: .text, text: "AKIAIOSFODNN7EXAMPLE", fingerprint: "text:pinned")
-    pinnedSecret.pinned = true
-    let purged = ClipboardHistory.purgingSecrets([secret, plain, pinnedSecret])
-    check("掃除で、秘密に見える履歴が消える", !purged.contains { $0.id == secret.id })
-    check("掃除で、ふつうの履歴は残る", purged.contains { $0.id == plain.id })
-    check("掃除でも、固定したものは残す", purged.contains { $0.id == pinnedSecret.id })
-    check("画像・ファイルは、掃除の対象にしない",
-          ClipboardHistory.purgingSecrets([ClipEntry(kind: .files, text: "/tmp/AKIAIOSFODNN7EXAMPLE", fingerprint: "files:x")]).count == 1)
-}
-// ゲージのドラッグ：外周の帯と名前の所は「移動（D&D の並べ替え）」、中の面は「スライド調整」。Option キーなどの修飾は使わない。
-do {
-    let tile = CGRect(x: 100, y: 100, width: 60, height: 60)
-    check("面の中央はスライド調整", GaugeGrab.zone(at: CGPoint(x: 130, y: 130), tile: tile, labelled: false) == .slide)
-    check("左の外周は移動", GaugeGrab.zone(at: CGPoint(x: 103, y: 130), tile: tile, labelled: false) == .move)
-    check("右の外周は移動", GaugeGrab.zone(at: CGPoint(x: 157, y: 130), tile: tile, labelled: false) == .move)
-    check("上の外周は移動", GaugeGrab.zone(at: CGPoint(x: 130, y: 157), tile: tile, labelled: false) == .move)
-    check("下の外周は移動", GaugeGrab.zone(at: CGPoint(x: 130, y: 103), tile: tile, labelled: false) == .move)
-    check("名前を出しているとき、名前の所は移動", GaugeGrab.zone(at: CGPoint(x: 130, y: 110), tile: tile, labelled: true) == .move)
-    check("名前を出していなければ、同じ所もスライド調整", GaugeGrab.zone(at: CGPoint(x: 130, y: 112), tile: tile, labelled: false) == .slide)
-    check("タイルの外は移動（調整しない）", GaugeGrab.zone(at: CGPoint(x: 10, y: 10), tile: tile, labelled: false) == .move)
-    check("横長の面は、横にスライドする", GaugeGrab.axis(tile: CGRect(x: 0, y: 0, width: 120, height: 40)) == .horizontal)
-    check("正方形の面は、縦にスライドする（上げると増える）", GaugeGrab.axis(tile: tile) == .vertical)
-    check("長さが短くても、最低の移動量で割る（敏感すぎない）", GaugeGrab.percent(delta: 60, length: 60) == 50)
-    check("最低の移動量の 1 回分で 100%", GaugeGrab.percent(delta: 120, length: 60) == 100)
-    check("下げると減る", GaugeGrab.percent(delta: -60, length: 60) == -50)
-    check("長い面は、その長さで割る", GaugeGrab.percent(delta: 100, length: 200) == 50)
-    var slide = GaugeAdjuster()
-    slide.addPercent(10); slide.addPercent(10)
-    check("スライドの量は足し合わさり、1 回で大きく動ける", slide.take(current: 50, maxChange: 100) == 70)
-    slide.addPercent(50)
-    check("ホイールの上限（10）は、スライドには掛けない指定ができ、掛ければ 10 まで", slide.take(current: 50) == 60)
-    slide.addPercent(-80)
-    check("スライドでも 0 を下回らない", slide.take(current: 30, maxChange: 100) == 0)
-    slide.addPercent(0.2)
-    check("細かすぎて動かないときは書かない", slide.take(current: 50, maxChange: 100) == nil)
-    // スライドの状態：押した所からの動きを、前回との差分（%）にして返す。
-    var vertical = GaugeSlide(start: CGPoint(x: 130, y: 130), tile: tile)
-    check("縦：上へ 60 点動くと +50%", vertical.move(to: CGPoint(x: 130, y: 190)) == 50)
-    check("縦：続けて同じ位置なら差分は 0", vertical.move(to: CGPoint(x: 130, y: 190)) == 0)
-    check("縦：下へ 30 点戻ると -25%", vertical.move(to: CGPoint(x: 130, y: 160)) == -25)
-    check("縦：横の動きは無視する", vertical.move(to: CGPoint(x: 200, y: 160)) == 0)
-    var horizontal = GaugeSlide(start: CGPoint(x: 10, y: 20), tile: CGRect(x: 0, y: 0, width: 240, height: 40))
-    check("横長：右へ 120 点動くと +50%（長さ 240）", horizontal.move(to: CGPoint(x: 130, y: 20)) == 50)
-    check("横長：左へ動くと減る", horizontal.move(to: CGPoint(x: 70, y: 20)) == -25)
-    check("スライドと見なすのは 3 点以上動いてから（クリックを奪わない）",
-          !GaugeSlide.isDrag(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 2, y: 0)) && GaugeSlide.isDrag(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: 3)))
-}
+// 機能ごとに分けたテスト（tests/*.swift）。
+runGaugeTests()
+runUiTextTests()
+runClipboardSecurityTests()
+runPersistenceTests()
 exit(failures.isEmpty ? 0 : 1)

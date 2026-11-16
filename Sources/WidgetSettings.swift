@@ -75,7 +75,7 @@ struct WidgetLivePreview: View {
             VStack(spacing: 6) {
                 tile(icon: icon, vertical: vertical, size: size)
                 if widget.showLabel {
-                    Text(widget.title).font(.system(size: 10)).lineLimit(1)
+                    Text(widget.title).font(.system(size: Typo.label)).lineLimit(1)
                 }
             }
             .padding(14)
@@ -326,7 +326,7 @@ extension WidgetSettingsView {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("コマンドを実行する")
                             Text(command)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: Typo.label, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)

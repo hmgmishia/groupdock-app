@@ -164,7 +164,7 @@ struct AppPickerView: View {
                 Spacer()
                 if isHovered {
                     Text(ref.path)
-                        .font(.system(size: 9))
+                        .font(.system(size: Typo.caption))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.head)

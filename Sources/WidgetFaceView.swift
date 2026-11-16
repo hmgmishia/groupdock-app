@@ -208,7 +208,7 @@ struct WidgetFaceView: View {
                     }
                     .stroke(tint, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
                 } else {
-                    Text("データを集めています…").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Text("データを集めています…").font(.system(size: Typo.caption)).foregroundStyle(.secondary)
                 }
             }
         }

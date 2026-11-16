@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import Foundation
+import Observation
 
 /// 件数の表示用（ウィジェットの文を作るスレッドから読むので、数字だけを別に持つ）。
 enum ClipboardCount {
@@ -17,22 +18,23 @@ enum ClipboardCount {
 /// - 保存は暗号化する（マスター鍵 1 つ＋件ごとの別の鍵。`ClipboardCrypto`）。鍵が取れないときは保存しない。
 /// - 保存先は GroupDock 専用のフォルダ（自分だけが読める権限）。通信はしない。
 /// - 機密の印（パスワード管理アプリなど）が付いた内容は保存しない。
-final class ClipboardStore: ObservableObject {
-    @Published private(set) var entries: [ClipEntry] = [] {
+@Observable
+final class ClipboardStore {
+    private(set) var entries: [ClipEntry] = [] {
         didSet { ClipboardCount.current = entries.count }
     }
     /// 一時停止中は何も記録しない（設定に保存する）。
-    @Published var paused: Bool {
+    var paused: Bool {
         didSet { UserDefaults.standard.set(paused, forKey: "ClipboardPaused") }
     }
 
-    private var lastChange = NSPasteboard.general.changeCount
-    private var timer: Timer?
+    @ObservationIgnored private var lastChange = NSPasteboard.general.changeCount
+    @ObservationIgnored private var timer: Timer?
     /// 自分でクリップボードへ入れたときの変更回数（自分の書き込みを履歴に足し直さないため）。
-    private var ownChange: Int?
-    private let keys: ClipboardKeyProvider
+    @ObservationIgnored private var ownChange: Int?
+    @ObservationIgnored private let keys: ClipboardKeyProvider
     /// 暗号化された索引があるのに開けない状態（鍵が違う・一時的に取れない）。この間は、既存の索引を上書きしない。
-    private var locked = false
+    @ObservationIgnored private var locked = false
     static var directoryOverride: URL?
 
     static var directory: URL {

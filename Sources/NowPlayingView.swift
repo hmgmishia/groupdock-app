@@ -24,7 +24,7 @@ struct NowPlayingThumb: View {
 
 /// 帯に置く「再生中」の見た目。表示パターンごとに中身を出し分ける。
 struct NowPlayingFace: View {
-    @ObservedObject var state: NowPlayingState
+    var state: NowPlayingState
     let layout: PlayerLayout
     let size: CGFloat
     var tint: Color = .accentColor
@@ -62,7 +62,7 @@ struct NowPlayingFace: View {
             VStack(spacing: 3) {
                 NowPlayingThumb(info: info, side: size - 12)
                 Text(info?.title ?? "再生していません")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.system(size: Typo.tiny, weight: .semibold))
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                 HStack(spacing: 0) { transport(info, font: 8) }
@@ -100,7 +100,7 @@ struct NowPlayingFace: View {
                 NowPlayingThumb(info: info, side: size - 10)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(info?.title ?? "再生していません")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: Typo.caption, weight: .semibold))
                         .lineLimit(1)
                     HStack(spacing: 0) { transport(info, font: 10) }
                     // 帯のバーは再生位置（いまの位置を反映し、離したらその位置へ移動する）。音量はポップアップで変える。
@@ -156,7 +156,7 @@ struct NowPlayingFace: View {
 
 /// ポップアップ：サムネ・曲名・操作・音量（対象サービスの音量）。
 struct NowPlayingPopup: View {
-    @ObservedObject var state: NowPlayingState
+    var state: NowPlayingState
     let store: Store
 
     @State private var volume = 0.0
@@ -181,14 +181,14 @@ struct NowPlayingPopup: View {
                         .playbackEnabled(info.capabilities.previous, reason: PlaybackReason.previous(info))
                     Button { store.playback(.toggle) } label: {
                         Image(systemName: info.playing ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 30))
+                            .font(.system(size: Typo.hero))
                     }
                     .playbackEnabled(info.capabilities.toggle, reason: "この再生元は再生/停止できません")
                     Button { store.playback(.next) } label: { Image(systemName: "forward.fill") }
                         .playbackEnabled(info.capabilities.next, reason: PlaybackReason.next(info))
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 16))
+                .font(.system(size: Typo.symbol))
                 .frame(maxWidth: .infinity)
                 HStack(spacing: 8) {
                     Image(systemName: "speaker.fill").font(.caption)

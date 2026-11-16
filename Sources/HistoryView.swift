@@ -82,7 +82,7 @@ struct HistoryTile: View {
                     // 引数つきは、通常の起動と見分けるための印。
                     if !ref.arguments.isEmpty {
                         Image(systemName: "text.append")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: Typo.caption, weight: .bold))
                             .padding(2)
                             .background(Circle().fill(Color.accentColor))
                             .foregroundStyle(.white)

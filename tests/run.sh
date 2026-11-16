@@ -10,7 +10,7 @@ DATA="$PWD/$OUT/data"
 rm -rf "$OUT"
 mkdir -p "$OUT" "$DATA"
 
-FILES="Model Persistence Widgets WidgetLibrary Badges TileHitTest StripLayout CommandGuard Watchdog SystemDock BubblePlacement WidgetActions NowPlaying Instances DockMenu MenuPresenter Clipboard ClipboardCrypto ClipboardStore AudioDevices AudioHardware AudioReader AudioPinEnforcer BluetoothPaired DisplayBrightness AppVersion GaugeWheel PopupLayout"
+FILES="Model Persistence Widgets WidgetLibrary Badges TileHitTest StripLayout CommandGuard Watchdog SystemDock BubblePlacement WidgetActions NowPlaying Instances DockMenu MenuPresenter Clipboard ClipboardCrypto ClipboardStore AudioDevices AudioHardware AudioReader AudioPinEnforcer BluetoothPaired DisplayBrightness AppVersion GaugeWheel PopupLayout GroupName"
 SOURCES=""
 for f in $FILES; do
     cp "Sources/$f.swift" "$OUT/$f.swift"

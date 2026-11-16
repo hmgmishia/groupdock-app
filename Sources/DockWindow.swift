@@ -435,6 +435,12 @@ final class DockWindowController: NSObject {
     var drag: (id: String, start: NSPoint, image: NSWindow?)?
     /// ドラッグ中の当たり判定用の矩形（押した時に 1 回だけ作り、イベントごとには作り直さない）。
     var dragRects: [String: NSRect] = [:]
+    /// ゲージ上のスライド（ドラッグ）の状態。並べ替えのドラッグ（`drag`）とは別。
+    var gaugeSlide: GaugeSlide?
+    var gaugeSlideID: UUID?
+    var gaugeSlideStart: CGPoint = .zero
+    /// 3 点以上動いて、スライドになったか（動かなければクリック）。
+    var gaugeSliding = false
 
     private static let peek: CGFloat = 6
 
@@ -674,7 +680,7 @@ final class DockWindowController: NSObject {
     }
 
     /// 溜まった量を、直列キューで 1 回ずつ書く。書き終えたとき溜まりが有れば、続けて書く（量を落とさない）。
-    private func flushGauge(_ widget: Widget) {
+    private func flushGauge(_ widget: Widget, maxChange: Int = GaugeWheel.maxStep) {
         let id = widget.id
         gaugeWriting.insert(id)
         let pending = gaugeAdjusters[id] ?? GaugeAdjuster()
@@ -684,7 +690,7 @@ final class DockWindowController: NSObject {
             let current: Int? = widget.kind == .brightness
                 ? DisplayReader.snapshot(for: widget).brightness
                 : AudioReader.snapshot(for: widget).volume
-            if let current, let next = adjuster.take(current: current) {
+            if let current, let next = adjuster.take(current: current, maxChange: maxChange) {
                 if widget.kind == .brightness {
                     DisplayReader.setBrightness(next, for: widget)
                 } else {
@@ -695,9 +701,17 @@ final class DockWindowController: NSObject {
                 guard let self else { return }
                 self.gaugeWriting.remove(id)
                 self.store.refreshWidgetsNow()
-                if self.gaugeAdjusters[id]?.hasPending == true { self.flushGauge(widget) }
+                if self.gaugeAdjusters[id]?.hasPending == true { self.flushGauge(widget, maxChange: maxChange) }
             }
         }
+    }
+
+    /// ゲージ上のスライド（ドラッグ）：動いた割合（%）を溜めて、直列キューで書く。ホイールと同じ経路。
+    func slideGauge(_ id: UUID, percent: Double) {
+        guard let widget = store.prefs.widgets.first(where: { $0.id == id }), GaugeWheel.adjustable(widget.kind) else { return }
+        gaugeAdjusters[id, default: GaugeAdjuster()].addPercent(percent)
+        guard !gaugeWriting.contains(id) else { return }
+        flushGauge(widget, maxChange: 100)
     }
 
     /// 吹き出しのホイール：上限を超えるときだけスクロールする。

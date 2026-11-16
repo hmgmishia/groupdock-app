@@ -49,6 +49,15 @@ final class ClipboardStore: ObservableObject {
         entries = load()
         // 平文だった旧い履歴は、読めたらすぐ暗号化して書き直す（画像も）。
         migrateIfNeeded()
+        purgeSecrets()
+    }
+
+    /// 以前の版で保存された、秘密に見えるテキストを履歴から消す（固定したものは残す）。変わったときだけ書く。
+    private func purgeSecrets() {
+        let cleaned = ClipboardHistory.purgingSecrets(entries)
+        guard cleaned.count != entries.count, unlockedForWriting() else { return }
+        entries = cleaned
+        save()
     }
 
     // MARK: - 監視
@@ -76,15 +85,16 @@ final class ClipboardStore: ObservableObject {
         lastChange = count
         if let own = ownChange, own == count { ownChange = nil; return }
         guard !paused else { return }
-        guard let entry = Self.read(board) else { return }
+        guard let entry = Self.read(board, sourceBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier) else { return }
         add(entry.entry, imageData: entry.imageData)
     }
 
-    /// クリップボードの中身を読む。機密の印があれば nil。
+    /// クリップボードの中身を読む。機密の印があるか、コピー元がパスワード管理アプリなら nil。
+    /// コピー元は、検知した時点で最前面のアプリ（0.5 秒ごとの監視なので近似。印が無い場合の保険）。
     /// 優先順位：ファイル → 画像（保存せずに直接入れた画像も含む）→ テキスト。
-    static func read(_ board: NSPasteboard) -> (entry: ClipEntry, imageData: Data?)? {
+    static func read(_ board: NSPasteboard, sourceBundleID: String? = nil) -> (entry: ClipEntry, imageData: Data?)? {
         let types = (board.types ?? []).map(\.rawValue)
-        guard ClipboardPolicy.shouldRecord(types: types) else { return nil }
+        guard ClipboardPolicy.shouldRecord(types: types, sourceBundleID: sourceBundleID) else { return nil }
 
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
            !urls.isEmpty, let entry = ClipboardParse.files(urls.map(\.path)) {

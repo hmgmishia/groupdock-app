@@ -28,6 +28,22 @@ extension DockWindowController {
                 drag = nil
                 return false
             }
+            // 音量・マイク・明るさのゲージは、掴む場所で分ける（修飾キーは使わない）。
+            // 外周の帯と名前の所は並べ替え（D&D）、内側の面はスライド調整。
+            gaugeSlide = nil
+            gaugeSlideID = nil
+            if id.hasPrefix("widget:"), let uuid = UUID(uuidString: String(id.dropFirst(7))),
+               let widget = store.prefs.widgets.first(where: { $0.id == uuid }), GaugeWheel.adjustable(widget.kind),
+               let tile = screenRects()[id] {
+                let labelled = widget.showLabel && store.prefs.showNames
+                if GaugeGrab.zone(at: point, tile: tile, labelled: labelled) == .slide {
+                    drag = nil
+                    gaugeSlide = GaugeSlide(start: point, tile: GaugeGrab.faceRect(tile: tile, labelled: labelled))
+                    gaugeSlideStart = point
+                    gaugeSlideID = uuid
+                    return false        // クリック（詳細を開く）は、動かなければ SwiftUI に任せる
+                }
+            }
             // 再生中ウィジェットは、サムネの所だけで並べ替えを始める（つまみ・音量・ボタンの操作を奪わない）。
             if id.hasPrefix("widget:"), let uuid = UUID(uuidString: String(id.dropFirst(7))),
                let widget = store.prefs.widgets.first(where: { $0.id == uuid }), widget.kind == .nowPlaying,
@@ -43,6 +59,19 @@ extension DockWindowController {
             return false            // クリック（起動）は SwiftUI に任せる
 
         case .leftMouseDragged:
+            // ゲージのスライド：3 点以上動いたら、動いた分を値に反映する（並べ替えは始めない）。
+            if var slide = gaugeSlide, let id = gaugeSlideID {
+                if !gaugeSliding {
+                    guard GaugeSlide.isDrag(from: gaugeSlideStart, to: point) else { return true }
+                    gaugeSliding = true
+                    slide = GaugeSlide(start: gaugeSlideStart, tile: GaugeGrab.faceRect(
+                        tile: screenRects()["widget:\(id.uuidString)"] ?? .zero, labelled: false))
+                }
+                let percent = slide.move(to: point)
+                gaugeSlide = slide
+                if percent != 0 { slideGauge(id, percent: percent) }
+                return true
+            }
             guard var state = drag else { return false }
             let distance = hypot(point.x - state.start.x, point.y - state.start.y)
             if state.image == nil, distance < 5 { return true }   // まだドラッグとは言えない
@@ -60,6 +89,14 @@ extension DockWindowController {
             return true
 
         case .leftMouseUp:
+            // ゲージのスライドを終える。動いていれば処理済み（クリック＝詳細を開くを出さない）。動いていなければクリックに任せる。
+            if gaugeSlide != nil {
+                let didSlide = gaugeSliding
+                gaugeSlide = nil
+                gaugeSlideID = nil
+                gaugeSliding = false
+                return didSlide
+            }
             guard let state = drag else { return false }
             state.image?.orderOut(nil)
             drag = nil

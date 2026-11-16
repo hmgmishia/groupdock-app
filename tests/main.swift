@@ -2277,4 +2277,90 @@ do {
     check("溜まりが無いときは、読みに行く必要が無い", { var empty = GaugeAdjuster(); return empty.hasPending == false }())
     check("溜まりが有れば、読みに行く", { var a = GaugeAdjuster(); a.add(deltaY: 1, precise: false); return a.hasPending }())
 }
+
+// グループ名の確定：前後の空白を除き、空なら元の名前に戻す。長すぎる名前は切る。
+do {
+    check("前後の空白を除く", GroupName.commit("  仕事  ", previous: "A") == "仕事")
+    check("空にしたら元の名前に戻す", GroupName.commit("", previous: "仕事") == "仕事")
+    check("空白だけでも元の名前に戻す", GroupName.commit("   \n", previous: "仕事") == "仕事")
+    check("改行は空白にして 1 行にする", GroupName.commit("a\nb", previous: "x") == "a b")
+    check("長すぎる名前は 40 文字で切る", GroupName.commit(String(repeating: "あ", count: 60), previous: "x").count == 40)
+    check("そのままの名前はそのまま", GroupName.commit("開発", previous: "x") == "開発")
+}
+
+// クリップボードのセキュリティ：印の無い秘密（鍵・トークン・カード番号・パスワード状）と、パスワード管理アプリからのコピーを保存しない。
+do {
+    check("秘密鍵のブロックは秘密", ClipboardPolicy.looksSecret("-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----"))
+    check("GitHub のトークンは秘密", ClipboardPolicy.looksSecret("ghp_" + String(repeating: "a", count: 36)))
+    check("AWS のアクセスキーは秘密", ClipboardPolicy.looksSecret("AKIAIOSFODNN7EXAMPLE"))
+    check("sk- で始まる API キーは秘密", ClipboardPolicy.looksSecret("sk-" + String(repeating: "A1b2", count: 8)))
+    check("JWT は秘密", ClipboardPolicy.looksSecret("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"))
+    check("Luhn を満たすカード番号は秘密", ClipboardPolicy.looksSecret("4111 1111 1111 1111"))
+    check("Luhn を満たさない数字は秘密でない", !ClipboardPolicy.looksSecret("4111111111111112"))
+    check("パスワード状（記号・大小・数字）は秘密", ClipboardPolicy.looksSecret("Tr0ub4dor&3xyz"))
+    check("ふつうの文は秘密でない", !ClipboardPolicy.looksSecret("明日の会議は 10 時からです"))
+    check("英文は秘密でない", !ClipboardPolicy.looksSecret("hello world"))
+    check("URL は秘密でない", !ClipboardPolicy.looksSecret("https://example.com/Path1?a=B2"))
+    check("パスは秘密でない", !ClipboardPolicy.looksSecret("/Users/me/Documents/Report2024"))
+    check("メールアドレスは秘密でない", !ClipboardPolicy.looksSecret("John.Doe1@example.com"))
+    check("識別子は秘密でない（記号なし）", !ClipboardPolicy.looksSecret("ClipboardPolicy2"))
+    check("パスワード管理アプリからのコピーは保存しない",
+          !ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text"], sourceBundleID: "com.1password.1password"))
+    check("Keychain Access からのコピーは保存しない",
+          !ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text"], sourceBundleID: "com.apple.keychainaccess"))
+    check("ふつうのアプリからのコピーは保存する",
+          ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text"], sourceBundleID: "com.apple.Safari"))
+    check("コピー元が分からなくても、印が無ければ保存する", ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text"], sourceBundleID: nil))
+    check("秘密に見えるテキストは、履歴の 1 件にしない", ClipboardParse.text("ghp_" + String(repeating: "a", count: 36)) == nil)
+    check("ふつうのテキストは、履歴の 1 件になる", ClipboardParse.text("議事録") != nil)
+    // 既に履歴にある分の掃除（固定したものは、利用者が選んだので残す）。
+    let secret = ClipEntry(kind: .text, text: "AKIAIOSFODNN7EXAMPLE", fingerprint: "text:AKIAIOSFODNN7EXAMPLE")
+    let plain = ClipEntry(kind: .text, text: "議事録", fingerprint: "text:議事録")
+    var pinnedSecret = ClipEntry(kind: .text, text: "AKIAIOSFODNN7EXAMPLE", fingerprint: "text:pinned")
+    pinnedSecret.pinned = true
+    let purged = ClipboardHistory.purgingSecrets([secret, plain, pinnedSecret])
+    check("掃除で、秘密に見える履歴が消える", !purged.contains { $0.id == secret.id })
+    check("掃除で、ふつうの履歴は残る", purged.contains { $0.id == plain.id })
+    check("掃除でも、固定したものは残す", purged.contains { $0.id == pinnedSecret.id })
+    check("画像・ファイルは、掃除の対象にしない",
+          ClipboardHistory.purgingSecrets([ClipEntry(kind: .files, text: "/tmp/AKIAIOSFODNN7EXAMPLE", fingerprint: "files:x")]).count == 1)
+}
+// ゲージのドラッグ：外周の帯と名前の所は「移動（D&D の並べ替え）」、中の面は「スライド調整」。Option キーなどの修飾は使わない。
+do {
+    let tile = CGRect(x: 100, y: 100, width: 60, height: 60)
+    check("面の中央はスライド調整", GaugeGrab.zone(at: CGPoint(x: 130, y: 130), tile: tile, labelled: false) == .slide)
+    check("左の外周は移動", GaugeGrab.zone(at: CGPoint(x: 103, y: 130), tile: tile, labelled: false) == .move)
+    check("右の外周は移動", GaugeGrab.zone(at: CGPoint(x: 157, y: 130), tile: tile, labelled: false) == .move)
+    check("上の外周は移動", GaugeGrab.zone(at: CGPoint(x: 130, y: 157), tile: tile, labelled: false) == .move)
+    check("下の外周は移動", GaugeGrab.zone(at: CGPoint(x: 130, y: 103), tile: tile, labelled: false) == .move)
+    check("名前を出しているとき、名前の所は移動", GaugeGrab.zone(at: CGPoint(x: 130, y: 110), tile: tile, labelled: true) == .move)
+    check("名前を出していなければ、同じ所もスライド調整", GaugeGrab.zone(at: CGPoint(x: 130, y: 112), tile: tile, labelled: false) == .slide)
+    check("タイルの外は移動（調整しない）", GaugeGrab.zone(at: CGPoint(x: 10, y: 10), tile: tile, labelled: false) == .move)
+    check("横長の面は、横にスライドする", GaugeGrab.axis(tile: CGRect(x: 0, y: 0, width: 120, height: 40)) == .horizontal)
+    check("正方形の面は、縦にスライドする（上げると増える）", GaugeGrab.axis(tile: tile) == .vertical)
+    check("長さが短くても、最低の移動量で割る（敏感すぎない）", GaugeGrab.percent(delta: 60, length: 60) == 50)
+    check("最低の移動量の 1 回分で 100%", GaugeGrab.percent(delta: 120, length: 60) == 100)
+    check("下げると減る", GaugeGrab.percent(delta: -60, length: 60) == -50)
+    check("長い面は、その長さで割る", GaugeGrab.percent(delta: 100, length: 200) == 50)
+    var slide = GaugeAdjuster()
+    slide.addPercent(10); slide.addPercent(10)
+    check("スライドの量は足し合わさり、1 回で大きく動ける", slide.take(current: 50, maxChange: 100) == 70)
+    slide.addPercent(50)
+    check("ホイールの上限（10）は、スライドには掛けない指定ができ、掛ければ 10 まで", slide.take(current: 50) == 60)
+    slide.addPercent(-80)
+    check("スライドでも 0 を下回らない", slide.take(current: 30, maxChange: 100) == 0)
+    slide.addPercent(0.2)
+    check("細かすぎて動かないときは書かない", slide.take(current: 50, maxChange: 100) == nil)
+    // スライドの状態：押した所からの動きを、前回との差分（%）にして返す。
+    var vertical = GaugeSlide(start: CGPoint(x: 130, y: 130), tile: tile)
+    check("縦：上へ 60 点動くと +50%", vertical.move(to: CGPoint(x: 130, y: 190)) == 50)
+    check("縦：続けて同じ位置なら差分は 0", vertical.move(to: CGPoint(x: 130, y: 190)) == 0)
+    check("縦：下へ 30 点戻ると -25%", vertical.move(to: CGPoint(x: 130, y: 160)) == -25)
+    check("縦：横の動きは無視する", vertical.move(to: CGPoint(x: 200, y: 160)) == 0)
+    var horizontal = GaugeSlide(start: CGPoint(x: 10, y: 20), tile: CGRect(x: 0, y: 0, width: 240, height: 40))
+    check("横長：右へ 120 点動くと +50%（長さ 240）", horizontal.move(to: CGPoint(x: 130, y: 20)) == 50)
+    check("横長：左へ動くと減る", horizontal.move(to: CGPoint(x: 70, y: 20)) == -25)
+    check("スライドと見なすのは 3 点以上動いてから（クリックを奪わない）",
+          !GaugeSlide.isDrag(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 2, y: 0)) && GaugeSlide.isDrag(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: 3)))
+}
 exit(failures.isEmpty ? 0 : 1)

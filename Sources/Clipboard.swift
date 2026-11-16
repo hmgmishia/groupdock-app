@@ -77,6 +77,12 @@ enum ClipboardHistory {
             return copy
         }
     }
+
+    /// 既に履歴にある、秘密に見えるテキストを除く（以前の版で保存されたものの掃除）。
+    /// 固定したものは、利用者が選んだので残す。画像・ファイルは対象にしない。
+    static func purgingSecrets(_ list: [ClipEntry]) -> [ClipEntry] {
+        list.filter { $0.pinned || $0.kind != .text || !ClipboardPolicy.looksSecret($0.text) }
+    }
 }
 
 /// 保存してはいけない内容の判定（純粋関数）。
@@ -89,9 +95,56 @@ enum ClipboardPolicy {
         "com.agilebits.onepassword",
     ]
 
-    /// 機密の印があれば保存しない。
-    static func shouldRecord(types: [String]) -> Bool {
-        !types.contains { concealedTypes.contains($0) }
+    /// コピー元がこれらのアプリなら、印が無くても保存しない（パスワード管理アプリ・キーチェーン）。
+    static let secretSourcePrefixes = [
+        "com.1password", "com.agilebits", "com.apple.keychainaccess", "com.apple.Passwords",
+        "com.bitwarden", "org.keepassxc", "com.lastpass", "com.dashlane", "in.sinew.Enpass", "com.enpass",
+    ]
+
+    /// 機密の印があるか、コピー元がパスワード管理アプリなら保存しない。
+    static func shouldRecord(types: [String], sourceBundleID: String? = nil) -> Bool {
+        if types.contains(where: { concealedTypes.contains($0) }) { return false }
+        if let sourceBundleID, secretSourcePrefixes.contains(where: { sourceBundleID.hasPrefix($0) }) { return false }
+        return true
+    }
+
+    /// 印が無くても、秘密に見えるテキストか（鍵・トークン・カード番号・パスワード状）。
+    /// 見逃しより誤検出の方が害が小さいので、迷うものは秘密として扱う。ただし URL・パス・メールは除く。
+    static func looksSecret(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("-----BEGIN"), trimmed.contains("PRIVATE KEY") { return true }
+        let tokenPatterns = [
+            "^(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}$", "^github_pat_[A-Za-z0-9_]{22,}$",
+            "^(AKIA|ASIA)[0-9A-Z]{16}$", "^sk-[A-Za-z0-9_-]{20,}$", "^xox[baprs]-[A-Za-z0-9-]{10,}$",
+            "^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+        ]
+        if tokenPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) { return true }
+        if isCardNumber(trimmed) { return true }
+        return looksLikePassword(trimmed)
+    }
+
+    /// 13〜19 桁（空白・ハイフン区切り可）で、Luhn を満たすもの。
+    private static func isCardNumber(_ text: String) -> Bool {
+        let digits = text.filter { $0 != " " && $0 != "-" }
+        guard (13...19).contains(digits.count), digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber),
+              text.allSatisfy({ $0.isNumber || $0 == " " || $0 == "-" }) else { return false }
+        var sum = 0
+        for (index, char) in digits.reversed().enumerated() {
+            var value = char.wholeNumberValue ?? 0
+            if index % 2 == 1 { value *= 2; if value > 9 { value -= 9 } }
+            sum += value
+        }
+        return sum % 10 == 0
+    }
+
+    /// 空白の無い 1 語で、大文字・小文字・数字・記号をすべて含む 8〜64 文字。URL・パス・メールは除く。
+    private static func looksLikePassword(_ text: String) -> Bool {
+        guard (8...64).contains(text.count), !text.contains(where: \.isWhitespace) else { return false }
+        if text.contains("://") || text.hasPrefix("/") || text.hasPrefix("~") { return false }
+        if text.range(of: "^[^@\\s]+@[^@\\s]+\\.[A-Za-z]{2,}$", options: .regularExpression) != nil { return false }
+        let symbols = Set("!@#$%^&*()+=<>?{}[]|~`;'\"\\")
+        return text.contains(where: \.isLowercase) && text.contains(where: \.isUppercase)
+            && text.contains(where: \.isNumber) && text.contains(where: { symbols.contains($0) })
     }
 
     /// 長すぎるテキストは保存しない（履歴ファイルが膨らむため）。
@@ -120,7 +173,7 @@ enum ClipboardParse {
     }
 
     static func text(_ string: String) -> ClipEntry? {
-        guard ClipboardPolicy.acceptsText(string) else { return nil }
+        guard ClipboardPolicy.acceptsText(string), !ClipboardPolicy.looksSecret(string) else { return nil }
         return ClipEntry(kind: .text, text: string, fingerprint: "text:" + string)
     }
 

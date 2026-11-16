@@ -409,7 +409,10 @@ struct GroupTile: View {
                     if let badge = groupBadge { BadgeView(text: badge, size: size) }
                 }
             if hasRunning { RunningDot() } else { Color.clear.frame(width: 5, height: 5) }
-            if store.prefs.showNames { TileName(text: group.name, width: StripLayout.nameWidth(size), fontSize: 10) }
+            if store.prefs.showNames {
+                EditableGroupName(name: $group.name, font: .system(size: 10),
+                                  width: StripLayout.nameWidth(size), alignment: .center)
+            }
         }
         .padding(.vertical, StripLayout.defaultTilePadding)
         .padding(.horizontal, StripLayout.defaultTilePadding)
@@ -499,7 +502,6 @@ struct GroupBubbleView: View {
     @Binding var group: Group
     let size: CGFloat
     @ObservedObject var drop: DropState
-    @State private var renaming = false
 
     var body: some View {
         let layout = store.bubbleLayout(for: group, opening: store.bubbleOpening(groupID: group.id))
@@ -559,24 +561,7 @@ struct GroupBubbleView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            // 開くたびに入力欄が先頭の入力欄になって全文選択される処理が重いので、
-            // 普段は文字で出し、ダブルクリックしたときだけ入力欄にする。
-            if renaming {
-                TextField("グループ名", text: $group.name)
-                    .textFieldStyle(.plain)
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .onSubmit { renaming = false }
-            } else {
-                Text(group.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { renaming = true }
-                    .help("ダブルクリックで名前を変える")
-            }
+            EditableGroupName(name: $group.name, font: .headline)
             Spacer()
             Button { Launcher.openAll(group.apps, group: group.name) } label: { Image(systemName: "play.fill") }
                 .help("すべて起動")

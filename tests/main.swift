@@ -2186,5 +2186,95 @@ do {
     check("戻すと FinderOpen も戻る", FinderOpen.newWindow == false)
 }
 
-print(failures.isEmpty ? "ALL OK" : "FAILED: \(failures)")
+// 保存と読み込みの集約（Persistence）：失敗の扱いを 1 か所にする。保存先はテスト用のフォルダ。
+do {
+    struct Sample: Codable, Equatable { var name: String; var count: Int }
+    let dir = Store.directory.appendingPathComponent("persistence-test", isDirectory: true)
+    let url = dir.appendingPathComponent("sample.json")
+    try? FileManager.default.removeItem(at: dir)
+
+    check("まだ無いファイルは、読み込みで nil", Persistence.load(Sample.self, from: url) == nil)
+    check("保存できる（フォルダも作る）", Persistence.save(Sample(name: "a", count: 1), to: url) == nil)
+    check("保存したものを読み直せる", Persistence.load(Sample.self, from: url) == Sample(name: "a", count: 1))
+    check("上書きできる", Persistence.save(Sample(name: "b", count: 2), to: url) == nil
+          && Persistence.load(Sample.self, from: url) == Sample(name: "b", count: 2))
+    try? Data("これは JSON ではない".utf8).write(to: url)
+    check("壊れたファイルは、読み込みで nil（落ちない）", Persistence.load(Sample.self, from: url) == nil)
+    // 書けない場所：ファイルの下にフォルダは作れない。
+    let blocked = url.appendingPathComponent("child.json")
+    check("書けない場所では、エラーを返す（落ちない）", Persistence.save(Sample(name: "c", count: 3), to: blocked) != nil)
+    try? FileManager.default.removeItem(at: dir)
+
+    // 失敗の記録：続けて失敗したときだけ、利用者に知らせる（1 回の失敗では騒がない）。
+    var tracker = SaveFailureTracker()
+    check("1 回目の失敗では知らせない", tracker.record(failed: true, key: "groups") == false)
+    check("2 回目でも知らせない", tracker.record(failed: true, key: "groups") == false)
+    check("3 回続けて失敗したら知らせる", tracker.record(failed: true, key: "groups") == true)
+    check("知らせたあとは、続けて失敗しても繰り返さない", tracker.record(failed: true, key: "groups") == false)
+    check("成功すれば数え直す", tracker.record(failed: false, key: "groups") == false)
+    check("数え直したあとは、また 3 回続けば知らせる",
+          [true, true, true].map { tracker.record(failed: $0, key: "groups") } == [false, false, true])
+    check("保存先ごとに別々に数える",
+          tracker.record(failed: true, key: "kept") == false && tracker.record(failed: true, key: "kept") == false
+          && tracker.record(failed: true, key: "kept") == true)
+}
+
+// ゲージ上のホイール調整：音量・マイク・明るさを、詳細を開かずに調整する。値の計算は純粋関数。
+do {
+    check("上へ回すと上がる（普通のマウス）", GaugeWheel.next(current: 50, deltaY: 1, precise: false) == 52)
+    check("下へ回すと下がる", GaugeWheel.next(current: 50, deltaY: -1, precise: false) == 48)
+    check("0 未満にならない", GaugeWheel.next(current: 1, deltaY: -10, precise: false) == 0)
+    check("100 を超えない", GaugeWheel.next(current: 99, deltaY: 10, precise: false) == 100)
+    check("トラックパッド（細かい量）は、小さく動く", GaugeWheel.next(current: 50, deltaY: 3, precise: true) == 51)
+    check("ごく小さな量でも、少なくとも 1 動く（止まらない）", GaugeWheel.next(current: 50, deltaY: 0.1, precise: true) == 51)
+    check("動かないとき（量 0）は、そのまま", GaugeWheel.next(current: 50, deltaY: 0, precise: true) == 50)
+    check("一度に動く量は 10 まで（勢いよく回しても急に変わらない）", GaugeWheel.next(current: 50, deltaY: 100, precise: false) == 60)
+    check("音量・マイク・明るさは、ホイールで調整できる",
+          [WidgetKind.volume, .microphone, .brightness].allSatisfy { GaugeWheel.adjustable($0) })
+    check("他の数値（CPU・メモリなど）は、調整できない",
+          ![WidgetKind.cpu, .memory, .disk, .battery, .clock, .nowPlaying].contains { GaugeWheel.adjustable($0) })
+}
+
+// 音量・マイク・明るさのポップアップ：文言を短くして改行し、幅を抑える（大きすぎた）。
+do {
+    check("ポップアップの幅は 220 以下", PopupLayout.width <= 220)
+    for subject in ["デバイス", "ディスプレイ"] {
+        for pinned in [true, false] {
+            let note = PopupLayout.pinnedNote(pinned: pinned, subject: subject)
+            check("\(subject) の説明（固定 \(pinned)）は 1 行 24 文字以内", note.split(separator: "\n").allSatisfy { $0.count <= 24 })
+            check("\(subject) の説明（固定 \(pinned)）は 3 行以内", note.split(separator: "\n").count <= 3)
+        }
+    }
+    check("接続されていない説明も、改行されて短い",
+          PopupLayout.unavailableNote(name: "とても長い名前の AirPods Pro").split(separator: "\n").allSatisfy { $0.count <= 24 })
+}
+
+// ホイール調整の競合：イベントごとに並行して「読む→計算→書く」をすると、取りこぼし・順序の逆転が起きる。
+// 量を足し合わせ、書く直前に 1 回だけ取り出す（GaugeAdjuster）。
+do {
+    var adjuster = GaugeAdjuster()
+    adjuster.add(deltaY: 1, precise: false)
+    adjuster.add(deltaY: 1, precise: false)
+    adjuster.add(deltaY: 1, precise: false)
+    check("溜めた量を、まとめて 1 回で取り出せる", adjuster.take(current: 50) == 56)
+    check("取り出したあとは、溜まりが空（同じ量を二重に書かない）", adjuster.take(current: 56) == nil)
+    adjuster.add(deltaY: 1, precise: false)
+    adjuster.add(deltaY: -1, precise: false)
+    check("上と下が打ち消し合えば、書かない", adjuster.take(current: 50) == nil)
+    adjuster.add(deltaY: 100, precise: false)
+    adjuster.add(deltaY: 100, precise: false)
+    check("溜めても、一度に動く量は上限まで（急に変わらない）", adjuster.take(current: 50) == 60)
+    adjuster.add(deltaY: -100, precise: false)
+    check("0 を下回らない", adjuster.take(current: 3) == 0)
+    adjuster.add(deltaY: 3, precise: true)
+    adjuster.add(deltaY: 3, precise: true)
+    check("トラックパッドの細かい量も足し合わせる", adjuster.take(current: 50) == 52)
+    // 書き込み中に来た量は、次の書き込みへ回る（落とさない）。
+    adjuster.add(deltaY: 1, precise: false)
+    let first = adjuster.take(current: 50)
+    adjuster.add(deltaY: 1, precise: false)
+    check("取り出し後に来た量は、次の取り出しで使われる", first == 52 && adjuster.take(current: 52) == 54)
+    check("溜まりが無いときは、読みに行く必要が無い", { var empty = GaugeAdjuster(); return empty.hasPending == false }())
+    check("溜まりが有れば、読みに行く", { var a = GaugeAdjuster(); a.add(deltaY: 1, precise: false); return a.hasPending }())
+}
 exit(failures.isEmpty ? 0 : 1)

@@ -388,6 +388,8 @@ final class Store: ObservableObject {
     private var widgetUpdatedAt: [UUID: Date] = [:]
     /// 設定の保存はドラッグ中に毎回書かず、少し待ってからまとめて書く。
     private var prefsSaveWork: DispatchWorkItem?
+    /// 保存の失敗を、保存先ごとに数える（続けて失敗したときだけ、利用者に知らせる）。
+    private var saveFailures = SaveFailureTracker()
 
     /// 保存先のフォルダ。テストでは差し替え、実データに触れない（`ClipboardStore.directoryOverride` と同じ形）。
     /// 差し替えは `Store()` を作る前に行う。
@@ -590,6 +592,12 @@ final class Store: ObservableObject {
     }
 
     /// 置いてあるウィジェットの文を、ウィジェットごとの更新頻度に合わせて作り直す。
+    /// ウィジェットの値を、次の周期を待たずにすぐ読み直す（ホイール調整のあと、ゲージを即座に動かす）。
+    func refreshWidgetsNow() {
+        widgetUpdatedAt = [:]
+        refreshWidgetText()
+    }
+
     private func refreshWidgetText() {
         let widgets = prefs.widgets
         guard !widgets.isEmpty else {
@@ -992,47 +1000,38 @@ final class Store: ObservableObject {
     }
 
     private static func load() -> [Group] {
-        if let data = try? Data(contentsOf: fileURL),
-           let groups = try? JSONDecoder().decode([Group].self, from: data) {
-            return groups
-        }
+        if let groups = Persistence.load([Group].self, from: fileURL) { return groups }
         // 初回は macOS の Dock にピン留めしてあるアプリを取り込んでおく。
         return [Group(name: "Dock", apps: dockPinnedApps())]
     }
 
     private static func loadHidden() -> Set<String> {
-        if let data = try? Data(contentsOf: hiddenURL),
-           let paths = try? JSONDecoder().decode([String].self, from: data) {
-            return Set(paths)
-        }
-        return []
+        Set(Persistence.load([String].self, from: hiddenURL) ?? [])
     }
 
-    private func saveHidden() {
-        do {
-            try FileManager.default.createDirectory(
-                at: Store.hiddenURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(hiddenRunning.sorted()).write(to: Store.hiddenURL, options: .atomic)
-        } catch {
-            NSLog("GroupDock: cannot save \(Store.hiddenURL.path): \(error.localizedDescription)")
+    /// 保存して、失敗は記録する。続けて失敗したときだけ、利用者に知らせる（`SaveFailureTracker`）。
+    private func persist<T: Encodable>(_ value: T, to url: URL, pretty: Bool = true) {
+        let error = Persistence.save(value, to: url, pretty: pretty)
+        if let error { NSLog("GroupDock: cannot save \(url.path): \(error.localizedDescription)") }
+        if saveFailures.record(failed: error != nil, key: url.lastPathComponent) {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "設定を保存できません"
+                alert.informativeText = "\(url.lastPathComponent) を続けて保存できませんでした。ディスクの空きと、フォルダの権限を確認してください。\n\(url.deletingLastPathComponent().path)"
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
         }
     }
+
+    private func saveHidden() { persist(hiddenRunning.sorted(), to: Store.hiddenURL) }
 
     private static func loadKept() -> [AppRef] {
-        if let data = try? Data(contentsOf: keptURL),
-           let refs = try? JSONDecoder().decode([AppRef].self, from: data) {
-            return refs
-        }
-        return []
+        Persistence.load([AppRef].self, from: keptURL) ?? []
     }
 
     private static func loadHistory() -> [AppRef] {
-        guard let data = try? Data(contentsOf: historyURL),
-              let refs = try? JSONDecoder().decode([AppRef].self, from: data) else { return [] }
-        return refs
+        Persistence.load([AppRef].self, from: historyURL) ?? []
     }
 
     /// 選べるインスタンスが 2 つ以上あるか（プロセスでもウィンドウでも）。青丸と選択ポップアップの条件。
@@ -1092,49 +1091,14 @@ final class Store: ObservableObject {
         saveHistory()
     }
 
-    private func saveHistory() {
-        do {
-            try FileManager.default.createDirectory(
-                at: Store.historyURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            try JSONEncoder().encode(history).write(to: Store.historyURL, options: .atomic)
-        } catch {
-            NSLog("GroupDock: cannot save \(Store.historyURL.path): \(error.localizedDescription)")
-        }
-    }
+    private func saveHistory() { persist(history, to: Store.historyURL, pretty: false) }
 
-    private func saveKept() {
-        do {
-            try FileManager.default.createDirectory(
-                at: Store.keptURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(kept).write(to: Store.keptURL, options: .atomic)
-        } catch {
-            NSLog("GroupDock: cannot save \(Store.keptURL.path): \(error.localizedDescription)")
-        }
-    }
+    private func saveKept() { persist(kept, to: Store.keptURL) }
 
-    private func save() {
-        do {
-            try FileManager.default.createDirectory(
-                at: Store.fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(groups).write(to: Store.fileURL, options: .atomic)
-        } catch {
-            NSLog("GroupDock: cannot save \(Store.fileURL.path): \(error.localizedDescription)")
-        }
-    }
+    private func save() { persist(groups, to: Store.fileURL) }
 
     private static func loadPrefs() -> Prefs {
-        if let data = try? Data(contentsOf: prefsURL),
-           let prefs = try? JSONDecoder().decode(Prefs.self, from: data) {
-            return prefs
-        }
-        return Prefs()
+        Persistence.load(Prefs.self, from: prefsURL) ?? Prefs()
     }
 
     /// 設定の保存を 0.4 秒待ってからまとめて行う（毎フレーム書くとドラッグがカクつく）。
@@ -1151,18 +1115,7 @@ final class Store: ObservableObject {
         savePrefs()
     }
 
-    private func savePrefs() {
-        do {
-            try FileManager.default.createDirectory(
-                at: Store.prefsURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(prefs).write(to: Store.prefsURL, options: .atomic)
-        } catch {
-            NSLog("GroupDock: cannot save \(Store.prefsURL.path): \(error.localizedDescription)")
-        }
-    }
+    private func savePrefs() { persist(prefs, to: Store.prefsURL) }
 
     private static func dockPinnedApps() -> [AppRef] {
         guard let dock = UserDefaults(suiteName: "com.apple.dock"),

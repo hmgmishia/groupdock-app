@@ -24,21 +24,19 @@ struct BrightnessWidgetControls: View {
                         Text("このディスプレイは明るさを変えられません").font(.caption).foregroundStyle(.secondary)
                     }
                 case .unavailable(_, let name):
-                    Text("「\(name)」は接続されていません。つなぐと、また使えます。")
+                    Text(PopupLayout.unavailableNote(name: name))
                         .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                 case .noDevice:
                     Text("ディスプレイがありません").font(.caption).foregroundStyle(.secondary)
                 }
             }
             if !DisplayHardware.isAvailable {
-                Text("この macOS では明るさを扱えません。").font(.caption).foregroundStyle(.orange)
+                Text("この macOS では明るさを\n扱えません。").font(.caption).foregroundStyle(.orange)
             }
-            Text(pinned
-                 ? "固定中：メインのディスプレイが変わっても、このディスプレイを操作します。"
-                 : "固定していません：メインのディスプレイを操作します。")
+            Text(PopupLayout.pinnedNote(pinned: pinned, subject: "ディスプレイ"))
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
-        .frame(minWidth: 260)
+        .frame(width: PopupLayout.width)
         .onAppear { reload() }
         // ポップアップを開いている間は、ディスプレイの抜き差しと明るさを 2 秒ごとに読み直す（閉じれば止まる）。
         .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in if !editing { reload() } }

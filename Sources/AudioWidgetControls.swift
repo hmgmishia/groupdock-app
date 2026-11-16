@@ -25,18 +25,16 @@ struct AudioWidgetControls: View {
                         Text("このデバイスは音量を変えられません").font(.caption).foregroundStyle(.secondary)
                     }
                 case .unavailable(_, let name):
-                    Text("「\(name)」は接続されていません。つなぐと、また使えます。")
+                    Text(PopupLayout.unavailableNote(name: name))
                         .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                 case .noDevice:
                     Text("使えるデバイスがありません").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Text(pinned
-                 ? "固定中：macOS が既定を切り替えても（AirPods の接続など）、このデバイスへ戻します。"
-                 : "固定していません：システムの既定のデバイスを操作します。")
+            Text(PopupLayout.pinnedNote(pinned: pinned, subject: "デバイス"))
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
-        .frame(minWidth: 260)
+        .frame(width: PopupLayout.width)
         .onAppear { reload() }
         // ポップアップを開いている間は、デバイスの抜き差しと音量を 2 秒ごとに読み直す（閉じれば止まる）。
         .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in if !editing { reload() } }

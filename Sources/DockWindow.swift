@@ -407,18 +407,23 @@ final class MenuAction: NSObject {
 }
 
 final class DockWindowController: NSObject {
-    private let store: Store
+    // メニューの組み立て（DockMenus.swift）から使うものは、private を付けない。
+    let store: Store
     /// この帯を出す画面（nil ならメイン画面）。
     private let screen: NSScreen?
-    private let panel: DockPanel
-    private let container: DockContainerView
-    private let bubble: GroupBubbleController
+    let panel: DockPanel
+    let container: DockContainerView
+    let bubble: GroupBubbleController
     private var cancellables = Set<AnyCancellable>()
     private var mouseTimer: Timer?
     private let hoverLabel = HoverLabel()
     /// マウスの動きを拾う仕掛け（名前の札をタイマーを待たずに更新する）。
     private var moveMonitors: [Any] = []
-    private let openGallery: () -> Void
+    let openGallery: () -> Void
+    /// ゲージのホイール調整：量の溜まり（ウィジェットごと）、書き込み中のウィジェット、読み書きを順に行う直列キュー。
+    private var gaugeAdjusters: [UUID: GaugeAdjuster] = [:]
+    private var gaugeWriting: Set<UUID> = []
+    private let gaugeQueue = DispatchQueue(label: "GroupDock.gauge", qos: .userInitiated)
     private var autoHidden = false {
         // 隠れている間は、見えないウィジェットと再生の更新を止める。
         didSet { store.stripHidden = autoHidden }
@@ -427,9 +432,9 @@ final class DockWindowController: NSObject {
     /// 最後に反映した時刻（イベントの間引きに使う）。
     private var lastResizeApply = Date.distantPast
     /// アイコンのドラッグ状態（掴んでいるタイルの id と開始位置・ドラッグ中の絵）。
-    private var drag: (id: String, start: NSPoint, image: NSWindow?)?
+    var drag: (id: String, start: NSPoint, image: NSWindow?)?
     /// ドラッグ中の当たり判定用の矩形（押した時に 1 回だけ作り、イベントごとには作り直さない）。
-    private var dragRects: [String: NSRect] = [:]
+    var dragRects: [String: NSRect] = [:]
 
     private static let peek: CGFloat = 6
 
@@ -541,6 +546,7 @@ final class DockWindowController: NSObject {
         bubble.rightClickMenu = { [weak self] point in self?.buildMenu(at: point) }
         bubble.rightClickTarget = { [weak self] _ in self?.appUnderMouse() != nil }
         bubble.scrollHandler = { [weak self] event in self?.scrollBubble(event) ?? false }
+        panel.scrollHandler = { [weak self] event in self?.scrollGauge(event) ?? false }
 
         layout()
         panel.orderFrontRegardless()
@@ -598,7 +604,7 @@ final class DockWindowController: NSObject {
         closeExpandedGroup()
     }
 
-    private func closeExpandedGroup() {
+    func closeExpandedGroup() {
         DispatchQueue.main.async { [weak self] in
             self?.bubble.detach()
             self?.store.expanded = nil
@@ -651,6 +657,49 @@ final class DockWindowController: NSObject {
         return TileHitTest.screenRect(rect, windowFrame: window, containerHeight: strip.size.height)
     }
 
+    /// ゲージ（音量・マイク・明るさのウィジェット）の上のホイール：詳細を開かずに値を調整する。
+    /// 対象の上でなければ false を返し、他の処理に任せる。
+    /// 量はウィジェットごとに主スレッドで足し合わせ、読み書きは直列キュー 1 本で行う（並行すると、取りこぼしや順序の逆転が起きる）。
+    private func scrollGauge(_ event: NSEvent) -> Bool {
+        let mouse = NSEvent.mouseLocation
+        guard let id = tileID(atScreenPoint: mouse), id.hasPrefix("widget:"),
+              let uuid = UUID(uuidString: String(id.dropFirst(7))),
+              let widget = store.prefs.widgets.first(where: { $0.id == uuid }),
+              GaugeWheel.adjustable(widget.kind) else { return false }
+        gaugeAdjusters[uuid, default: GaugeAdjuster()].add(
+            deltaY: Double(event.scrollingDeltaY), precise: event.hasPreciseScrollingDeltas)
+        guard !gaugeWriting.contains(uuid) else { return true }   // 書き込み中なら、終わったあとに溜まりを続けて使う
+        flushGauge(widget)
+        return true
+    }
+
+    /// 溜まった量を、直列キューで 1 回ずつ書く。書き終えたとき溜まりが有れば、続けて書く（量を落とさない）。
+    private func flushGauge(_ widget: Widget) {
+        let id = widget.id
+        gaugeWriting.insert(id)
+        let pending = gaugeAdjusters[id] ?? GaugeAdjuster()
+        gaugeAdjusters[id] = GaugeAdjuster()
+        gaugeQueue.async { [weak self] in
+            var adjuster = pending
+            let current: Int? = widget.kind == .brightness
+                ? DisplayReader.snapshot(for: widget).brightness
+                : AudioReader.snapshot(for: widget).volume
+            if let current, let next = adjuster.take(current: current) {
+                if widget.kind == .brightness {
+                    DisplayReader.setBrightness(next, for: widget)
+                } else {
+                    AudioReader.setVolume(next, for: widget)
+                }
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.gaugeWriting.remove(id)
+                self.store.refreshWidgetsNow()
+                if self.gaugeAdjusters[id]?.hasPending == true { self.flushGauge(widget) }
+            }
+        }
+    }
+
     /// 吹き出しのホイール：上限を超えるときだけスクロールする。
     private func scrollBubble(_ event: NSEvent) -> Bool {
         guard let layout = currentBubbleLayout(), layout.maxScroll > 0 else { return false }
@@ -667,7 +716,7 @@ final class DockWindowController: NSObject {
     }
 
     /// 帯と吹き出しのタイルの枠を、画面座標でまとめる。状態から計算した枠だけを使う。
-    private func screenRects() -> [String: NSRect] {
+    func screenRects() -> [String: NSRect] {
         var result: [String: NSRect] = [:]
         let strip = store.stripLayout()
         for (id, rect) in strip.frames {
@@ -689,366 +738,13 @@ final class DockWindowController: NSObject {
     }
 
     /// 画面座標の点にあるタイル。
-    private func tileID(atScreenPoint point: NSPoint) -> String? {
+    func tileID(atScreenPoint point: NSPoint) -> String? {
         TileHitTest.id(atScreenPoint: point, rects: screenRects())
     }
 
-    /// パネル内の座標でのドラッグ処理（SwiftUI のドラッグはこのパネルでは効かないため）。
-    private func handleLeftMouse(_ event: NSEvent) -> Bool {
-        // 画面座標で判定する（帯と吹き出しをまたいでも同じ規則になる）。
-        let point = NSEvent.mouseLocation
-
-        switch event.type {
-        case .leftMouseDown:
-            // サイズ変更のつまみの上は、タイルより優先する（アプリに引っ張られない）。
-            if !container.handle.isHidden,
-               panel.convertToScreen(container.handle.frame).contains(point) {
-                drag = nil
-                return false
-            }
-            guard let id = tileID(atScreenPoint: point),
-                  id.hasPrefix("app:") || id.hasPrefix("group:") || id.hasPrefix("widget:") else {
-                drag = nil
-                return false
-            }
-            // 「残さない」区分（実行中だけのアプリ）は並べ替え・グループ化の対象にしない。
-            if id.hasPrefix("app:"), !store.isInKeepZone(appID: String(id.dropFirst(4))) {
-                drag = nil
-                return false
-            }
-            // 再生中ウィジェットは、サムネの所だけで並べ替えを始める（つまみ・音量・ボタンの操作を奪わない）。
-            if id.hasPrefix("widget:"), let uuid = UUID(uuidString: String(id.dropFirst(7))),
-               let widget = store.prefs.widgets.first(where: { $0.id == uuid }), widget.kind == .nowPlaying,
-               let tile = screenRects()[id],
-               !NowPlayingGrab.allowsDrag(
-                   at: point, tile: tile, layout: widget.playerLook(vertical: store.prefs.position != "bottom"),
-                   icon: store.effectiveIconSize, vertical: store.prefs.position != "bottom") {
-                drag = nil
-                return false
-            }
-            drag = (id: id, start: point, image: nil)
-            dragRects = screenRects()
-            return false            // クリック（起動）は SwiftUI に任せる
-
-        case .leftMouseDragged:
-            guard var state = drag else { return false }
-            let distance = hypot(point.x - state.start.x, point.y - state.start.y)
-            if state.image == nil, distance < 5 { return true }   // まだドラッグとは言えない
-            if state.image == nil {
-                state.image = makeDragImage(for: state.id)
-                store.dragging = true
-            }
-            drag = state
-            moveDragImage(to: NSEvent.mouseLocation)
-            let insertion = insertionPoint(for: state.id, at: point)
-            store.insertion = insertion
-            // 挿入するときは重ねる（グループ化）の強調を出さない。
-            store.dropTargetID = insertion != nil ? nil
-                : TileHitTest.id(atScreenPoint: point, rects: dragRects).flatMap { $0 == state.id ? nil : $0 }
-            return true
-
-        case .leftMouseUp:
-            guard let state = drag else { return false }
-            state.image?.orderOut(nil)
-            drag = nil
-            let target = TileHitTest.id(atScreenPoint: point, rects: dragRects)
-            let insertion = insertionPoint(for: state.id, at: point)
-            store.insertion = nil
-            store.dragging = false
-            store.dropTargetID = nil
-            // 動いていなければクリック扱い（SwiftUI に任せる）。
-            if hypot(point.x - state.start.x, point.y - state.start.y) < 5 {
-                // 帯のアプリを押して起動したときは、開いているグループを閉じる（吹き出しの中のクリックは閉じない）。
-                if store.expanded != nil, GroupDismissal.closesOnClick(target: state.id),
-                   !(bubble.isShown && bubble.frame.contains(point)) {
-                    closeExpandedGroup()
-                }
-                return false
-            }
-            // 挿入・並べ替えは Apple 標準のスプリングで動かす（周りのアイコンが道を空ける）。
-            withAnimation(Motion.spring) {
-                if state.id.hasPrefix("widget:") {
-                    // ウィジェットはウィジェットの並びの中だけで入れ替える。
-                    if let insertion,
-                       let from = UUID(uuidString: String(state.id.dropFirst(7))),
-                       let to = UUID(uuidString: String(insertion.id.dropFirst(7))) {
-                        store.reorderWidget(from, before: to, after: insertion.after)
-                    }
-                } else if let insertion {
-                    store.reorder(
-                        appID: String(state.id.dropFirst(4)),
-                        before: String(insertion.id.dropFirst(4)), after: insertion.after)
-                } else {
-                    drop(state.id, onto: target, at: point)
-                }
-            }
-            return true
-
-        default:
-            return false
-        }
-    }
-
-    /// ドラッグ中にカーソルへ付いてくる絵。帯（か吹き出し）に描いているタイルをそのまま写す。
-    private func makeDragImage(for id: String) -> NSWindow? {
-        guard let rect = dragRects[id], let image = snapshot(screenRect: rect) else { return nil }
-        let window = NSPanel(
-            contentRect: NSRect(origin: .zero, size: rect.size),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        window.isFloatingPanel = true
-        window.hidesOnDeactivate = false
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false      // 動かすたびに影を計算し直すと重い
-        window.ignoresMouseEvents = true
-        // 帯・吹き出し（.floating）より前に出し、別のスペースやフルスクリーン上でも見えるようにする。
-        window.level = .popUpMenu
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
-        window.isReleasedWhenClosed = false
-        window.alphaValue = 0.85
-        let imageView = NSImageView(frame: NSRect(origin: .zero, size: rect.size))
-        imageView.image = image
-        imageView.imageScaling = .scaleNone
-        window.contentView = imageView
-        window.orderFrontRegardless()
-        return window
-    }
-
-    /// 画面上の枠にある自分の描画（帯か吹き出し）を写し取る。
-    private func snapshot(screenRect rect: NSRect) -> NSImage? {
-        let source: NSWindow = bubble.isShown && bubble.frame.contains(NSPoint(x: rect.midX, y: rect.midY))
-            ? bubble.window : panel
-        guard let view = source.contentView else { return nil }
-        let local = view.convert(source.convertFromScreen(rect), from: nil)
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: local) else { return nil }
-        view.cacheDisplay(in: local, to: rep)
-        let image = NSImage(size: rect.size)
-        image.addRepresentation(rep)
-        return image
-    }
-
-    private func moveDragImage(to mouse: NSPoint) {
-        guard let window = drag?.image else { return }
-        let size = window.frame.size
-        window.setFrameOrigin(NSPoint(x: mouse.x - size.width / 2, y: mouse.y - size.height / 2))
-    }
-
-    /// ドラッグ中のアプリを入れる位置。プレビューとドロップで同じ判定を使う（当たり判定は押した時の枠で固定）。
-    private func insertionPoint(for draggedID: String, at point: NSPoint) -> DropState.Insertion? {
-        // ウィジェットは、ウィジェットの前後にだけ入る（帯の上なら左右・上下で前後を決める）。
-        if draggedID.hasPrefix("widget:") {
-            let vertical = store.prefs.position != "bottom"
-            let hit = TileHitTest.id(atScreenPoint: point, rects: dragRects)
-            if let hit, hit.hasPrefix("widget:"), hit != draggedID, let rect = dragRects[hit] {
-                let after = vertical ? point.y < rect.midY : point.x > rect.midX
-                return DropState.Insertion(id: hit, after: after)
-            }
-            return TileHitTest.insertion(
-                at: point, rects: dragRects, dragged: draggedID, vertical: vertical, prefix: "widget:"
-            ).map { DropState.Insertion(id: $0.id, after: $0.after) }
-        }
-        guard draggedID.hasPrefix("app:") else { return nil }
-        var found = TileHitTest.insertion(
-            at: point, rects: dragRects, dragged: draggedID, vertical: store.prefs.position != "bottom")
-        // 吹き出しの中は格子なので、左右で前後を決める。
-        if let hit = found, let id = store.expanded,
-           let group = store.groups.first(where: { $0.id == id }),
-           group.apps.contains(where: { "app:\($0.id)" == hit.id }) {
-            found = TileHitTest.insertion(at: point, rects: dragRects, dragged: draggedID, vertical: false)
-        }
-        return found.map { DropState.Insertion(id: $0.id, after: $0.after) }
-    }
-
-    /// ドロップしたときの処理（iPhone と同じ：重ねればフォルダ・グループへは入れ子・並べ替え）。
-    private func drop(_ draggedID: String, onto targetID: String?, at point: NSPoint) {
-        guard let targetID else {
-            if draggedID.hasPrefix("app:") {
-                let source = String(draggedID.dropFirst(4))
-                // 何もない所へ落としたら「残す」並びの末尾へ。
-                store.moveToEnd(appID: source)
-            }
-            return
-        }
-        if draggedID.hasPrefix("app:"), targetID.hasPrefix("app:") {
-            let source = String(draggedID.dropFirst(4))
-            let target = String(targetID.dropFirst(4))
-            // 別々の場所なら新しいグループを作る（アイコンを重ねてフォルダ）。
-            let sourceGroup = store.groupID(ofApp: source)
-            let targetGroup = store.groupID(ofApp: target)
-            if sourceGroup != nil, sourceGroup == targetGroup {
-                store.reorder(appID: source, before: target)      // 同じグループ内は並べ替え
-            } else if sourceGroup != nil, targetGroup == nil {
-                store.reorder(appID: source, before: target)      // グループから出して並べ替え
-            } else if let groupID = store.createGroup(from: source, with: target) {
-                store.expanded = groupID                           // できたフォルダを開いて見せる
-            }
-            return
-        }
-        if draggedID.hasPrefix("app:"), targetID.hasPrefix("group:") {
-            guard let uuid = UUID(uuidString: String(targetID.dropFirst(6))) else { return }
-            store.move(appID: String(draggedID.dropFirst(4)), intoGroup: uuid)
-            return
-        }
-        if draggedID.hasPrefix("group:"), targetID.hasPrefix("group:") {
-            guard let from = UUID(uuidString: String(draggedID.dropFirst(6))),
-                  let to = UUID(uuidString: String(targetID.dropFirst(6))) else { return }
-            store.merge(groupID: from, into: to)
-        }
-    }
 
     /// 右クリック位置にあるアプリのメニュー。帯と吹き出しのどちらでも、同じ計算済みの枠で当てる。
-    private func buildMenu(at point: NSPoint) -> NSMenu? {
-        _ = point
-        if let ref = appUnderMouse() { return appMenu(for: ref) }
-        return stripMenu()
-    }
-
-    /// 右クリックの対象。アプリなら .app、仕切り線・空きなら .strip。他のタイル（ウィジェット・グループ・ボタン）は SwiftUI 側のメニューに任せる。
-    private enum RightClickKind { case app, strip }
-
-    private func rightClickKind() -> RightClickKind? {
-        if appUnderMouse() != nil { return .app }
-        let mouse = NSEvent.mouseLocation
-        guard panel.frame.contains(mouse) else { return nil }
-        guard let id = tileID(atScreenPoint: mouse) else { return .strip }       // 空き
-        return id.hasPrefix("sep:") ? .strip : nil                              // 仕切り線
-    }
-
-    /// 仕切り線・空きの右クリックメニュー。ウィジェットの追加から、プレビューと取り込みのある窓を開く。
-    private func stripMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        // 窓の中に、各ウィジェットのプレビューと外部ウィジェットの取り込みがある（1 か所で足せる）。
-        add(menu, title: StripMenuSpec.addItem().title, action: MenuAction { [weak self] in self?.openGallery() })
-        menu.addItem(.separator())
-
-        // 設定画面を開かずに切り替えられるもの（自動で隠す・表示する場所）。
-        let prefs = store.prefs
-        addChecked(menu, StripMenuSpec.autoHideItem(autoHide: prefs.autoHide))
-        let placeMenu = NSMenu()
-        placeMenu.autoenablesItems = false
-        for item in StripMenuSpec.placeItems(position: prefs.position) { addChecked(placeMenu, item) }
-        let holder = NSMenuItem(title: "表示する場所", action: nil, keyEquivalent: "")
-        holder.submenu = placeMenu
-        menu.addItem(holder)
-        return menu
-    }
-
-    /// チェック付きの項目。押すと、設定を変える（設定画面と同じ値なので、画面側にも反映される）。
-    private func addChecked(_ menu: NSMenu, _ spec: StripMenuSpec.Item) {
-        add(menu, title: spec.title, action: MenuAction { [weak self] in
-            guard let self else { return }
-            let next = StripMenuSpec.apply(spec.action, autoHide: self.store.prefs.autoHide, position: self.store.prefs.position)
-            if next.autoHide != self.store.prefs.autoHide { self.store.prefs.autoHide = next.autoHide }
-            if next.position != self.store.prefs.position { self.store.prefs.position = next.position }
-        })
-        menu.items.last?.state = spec.checked ? .on : .off
-    }
-
-    /// カーソルの下のアプリ（帯・吹き出し）。軽い判定なので押した瞬間に使える。
-    private func appUnderMouse() -> AppRef? {
-        guard let id = tileID(atScreenPoint: NSEvent.mouseLocation), id.hasPrefix("app:") else { return nil }
-        return store.appRef(id: String(id.dropFirst(4))) ?? pinnedRef(id: String(id.dropFirst(4)))
-    }
-
-    /// 固定アプリ（Finder・Apps）は一覧に無いので、id から作る。
-    private func pinnedRef(id: String) -> AppRef? {
-        AppRef.pinnedPaths.contains(id) ? AppRef(path: id) : nil
-    }
-
-    private func appMenu(for ref: AppRef) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-
-        add(menu, title: "Finder で開く（\(ref.name)の場所）", action: MenuAction {
-            // アプリの束そのものを Finder で選んだ状態にする。
-            Launcher.revealInFinder(ref)
-        })
-        if ref.bundleID == "com.apple.finder" {
-            // Finder：開いているウィンドウを使うか、毎回新しいウィンドウを開くか（チェックはいまの選択）。
-            for item in FinderOpen.menuItems(newWindow: store.prefs.finderNewWindow) {
-                add(menu, title: item.title, action: MenuAction { [weak self] in
-                    self?.store.prefs.finderNewWindow = item.newWindow
-                })
-                menu.items.last?.state = item.checked ? .on : .off
-            }
-            menu.addItem(.separator())
-        }
-        add(menu, title: "パス: \(ref.path)（クリックでコピー）", action: MenuAction {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(ref.path, forType: .string)
-        })
-
-        let args = ref.arguments.isEmpty ? "なし" : ref.arguments
-        add(menu, title: "引数: \(args)", action: MenuAction {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(ref.arguments, forType: .string)
-        })
-
-        if Launcher.isRunning(ref) {
-            add(menu, title: "起動中のコマンドラインを見る…", action: MenuAction {
-                if let command = Launcher.commandLine(ref) {
-                    AppDialogs.showCommandLine(ref, command: command)
-                }
-            })
-        }
-        add(menu, title: "引数を指定して起動…", action: MenuAction {
-            AppDialogs.askArguments(current: ref.arguments, title: ref.name) { args in
-                Launcher.open(AppRef(path: ref.path, arguments: args, keepWhenQuit: ref.keepWhenQuit))
-            }
-        })
-        add(menu, title: "引数を変えて複製…", action: MenuAction { [weak self] in
-            AppDialogs.askArguments(current: ref.arguments, title: ref.name) { args in
-                self?.store.duplicate(ref, arguments: args)
-            }
-        })
-
-        menu.addItem(.separator())
-        // 帯のアプリ（固定・残す・実行中）の項目。名前は「バーに残す」「終了」に揃える。
-        if Launcher.isRunning(ref) {
-            add(menu, title: "再起動", action: MenuAction { Launcher.restart(ref) })
-            if store.hungPaths.contains(ref.path) {
-                add(menu, title: "強制終了", action: MenuAction { Launcher.forceQuit(ref) })
-            } else {
-                add(menu, title: "終了", action: MenuAction { Launcher.quit(ref) })
-            }
-        }
-        if !ref.isPinned {
-            if store.isKept(ref.path) {
-                add(menu, title: "バーから外す", action: MenuAction { [weak self] in
-                    self?.store.removeEverywhere(id: ref.id)
-                })
-            } else {
-                add(menu, title: "バーに残す", action: MenuAction { [weak self] in
-                    self?.store.keepOnStrip(ref.path)
-                })
-            }
-        }
-
-        // アプリ自身が定義したメニュー（新規ウィンドウ・最近使った項目・オプションなど）を、区切り線の下にそのまま並べる。
-        let appItems = DockMenu.menuItems(DockMenu.read(path: ref.path)) { titles in
-            DispatchQueue.global(qos: .userInitiated).async { DockMenu.perform(path: ref.path, titles: titles) }
-        }
-        if !appItems.isEmpty {
-            menu.addItem(.separator())
-            appItems.forEach(menu.addItem)
-        }
-        return menu
-    }
-
-    private func add(_ menu: NSMenu, title: String, action: MenuAction) {
-        let item = NSMenuItem(title: title, action: #selector(runMenuAction(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = action
-        menu.addItem(item)
-    }
-
-    @objc private func runMenuAction(_ sender: NSMenuItem) {
-        (sender.representedObject as? MenuAction)?.run()
-    }
+    /// （メニューの組み立ては `DockMenus.swift`）
 
     /// メニューなどからグループの吹き出しを開く。
     func openGroup(_ id: UUID) {

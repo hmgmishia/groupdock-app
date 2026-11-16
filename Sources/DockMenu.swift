@@ -1,7 +1,7 @@
 import AppKit
 import ApplicationServices
 
-/// アプリ自身が定義した Dock のメニュー（新規ウインドウ・最近使った項目など）を、標準 Dock の AX から読んで実行する。
+/// アプリ自身が定義した Dock のメニュー（新規ウィンドウ・最近使った項目など）を、標準 Dock の AX から読んで実行する。
 /// 読むときだけ標準 Dock のメニューを開き、読み終えたらすぐ閉じる。private API は使わない。
 enum DockMenu {
     struct Entry: Equatable {

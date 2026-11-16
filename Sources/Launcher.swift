@@ -12,19 +12,26 @@ enum Launcher {
     }
 
     /// 起動中なら前面に出す。止まっていれば開く。
-    /// Finder のように常に起動していてウィンドウが無いアプリは、押しても何も起きないので
-    /// ウィンドウが無ければ新しく開く。
+    /// Finder は、既定では開いているウィンドウを前面に出し、ウィンドウが無いときだけ新しく開く。
+    /// 設定「毎回新しいウィンドウを開く」は `FinderOpen.currentAction` が読む（どの経路から呼んでも同じ動き）。
     static func open(_ ref: AppRef) {
         // 引数つきの項目は、別プロジェクトを開くために毎回新しく起動する。
         let hasArguments = !ref.argumentList.isEmpty
         if !hasArguments, let app = running(ref).first {
-            _ = app.activate(options: [.activateAllWindows])
-            if hasVisibleWindows(pid: app.processIdentifier) { return }
             if ref.bundleID == "com.apple.finder" {
-                // Finder はホームで新しいウィンドウを開く。
-                NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true))
+                let hasWindows = hasVisibleWindows(pid: app.processIdentifier)
+                switch FinderOpen.currentAction(hasWindows: hasWindows) {
+                case .activateOnly:
+                    _ = app.activate(options: [.activateAllWindows])
+                case .openNewWindow:
+                    // ホームで新しいウィンドウを開く。
+                    _ = app.activate(options: [])
+                    NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true))
+                }
                 return
             }
+            _ = app.activate(options: [.activateAllWindows])
+            if hasVisibleWindows(pid: app.processIdentifier) { return }
         }
         // 本当に起動するときだけ、履歴に残す（前面に出すだけのときは残さない）。
         NotificationCenter.default.post(name: .groupDockLaunch, object: nil, userInfo: ["ref": ref])
@@ -96,7 +103,7 @@ enum Launcher {
 
     /// グループ全体の起動。必ず確認してから行う（勝手に実行しない）。
     static func openAll(_ apps: [AppRef], group: String) {
-        confirm("「\(group)」の \(apps.count) 個をすべて起動しますか？", button: "起動") { apps.forEach(open) }
+        confirm("「\(group)」の \(apps.count) 個をすべて起動しますか？", button: "起動") { apps.forEach { open($0) } }
     }
 
     /// グループ全体の終了。必ず確認してから行う。

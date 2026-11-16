@@ -967,6 +967,16 @@ final class DockWindowController: NSObject {
             // アプリの束そのものを Finder で選んだ状態にする。
             Launcher.revealInFinder(ref)
         })
+        if ref.bundleID == "com.apple.finder" {
+            // Finder：開いているウィンドウを使うか、毎回新しいウィンドウを開くか（チェックはいまの選択）。
+            for item in FinderOpen.menuItems(newWindow: store.prefs.finderNewWindow) {
+                add(menu, title: item.title, action: MenuAction { [weak self] in
+                    self?.store.prefs.finderNewWindow = item.newWindow
+                })
+                menu.items.last?.state = item.checked ? .on : .off
+            }
+            menu.addItem(.separator())
+        }
         add(menu, title: "パス: \(ref.path)（クリックでコピー）", action: MenuAction {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(ref.path, forType: .string)
@@ -1018,7 +1028,7 @@ final class DockWindowController: NSObject {
             }
         }
 
-        // アプリ自身が定義したメニュー（新規ウインドウ・最近使った項目・オプションなど）を、区切り線の下にそのまま並べる。
+        // アプリ自身が定義したメニュー（新規ウィンドウ・最近使った項目・オプションなど）を、区切り線の下にそのまま並べる。
         let appItems = DockMenu.menuItems(DockMenu.read(path: ref.path)) { titles in
             DispatchQueue.global(qos: .userInitiated).async { DockMenu.perform(path: ref.path, titles: titles) }
         }

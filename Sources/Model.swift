@@ -193,8 +193,6 @@ struct Prefs: Codable, Equatable {
     var autoHide: Bool = true
     /// macOS の Dock を隠す（標準 ON。オフに戻すと元の設定に戻る）。
     var hideSystemDock: Bool = true
-    /// 設定画面の詳細モード。
-    var advanced: Bool = false
     /// アイコンの間隔。帯の中も、グループの中（履歴・インスタンス選択を含む）も、この 1 つの値を共有する。
     var gap: Double = 10
     /// アイコンの下に名前を出す（基本はオフ）。
@@ -218,7 +216,8 @@ struct Prefs: Codable, Equatable {
     var overflow: String = "pages"
     /// ページ切り替えで、縦に並べる数（左右置きは列の数、下置きは段の数）。既定 1。ページに関係なく一定。
     var stripLines: Int = 1
-
+    /// Finder をクリックしたとき、毎回新しいウィンドウを開くか。false（既定）なら、開いているウィンドウを前面に出す。Finder の右クリックで切り替える。
+    var finderNewWindow: Bool = false
     /// 並べる数は 1〜6 に収める。
     static func clampLines(_ value: Int) -> Int { max(1, min(6, value)) }
 
@@ -231,7 +230,6 @@ struct Prefs: Codable, Equatable {
         iconSize = try c.decodeIfPresent(Double.self, forKey: .iconSize) ?? d.iconSize
         autoHide = try c.decodeIfPresent(Bool.self, forKey: .autoHide) ?? d.autoHide
         hideSystemDock = try c.decodeIfPresent(Bool.self, forKey: .hideSystemDock) ?? d.hideSystemDock
-        advanced = try c.decodeIfPresent(Bool.self, forKey: .advanced) ?? d.advanced
         gap = try c.decodeIfPresent(Double.self, forKey: .gap) ?? d.gap
         // 廃止した種類（再生中など）が残っていても、他の設定を巻き込まずに読み飛ばす。
         widgets = (try c.decodeIfPresent([LossyWidget].self, forKey: .widgets))?.compactMap(\.value) ?? d.widgets
@@ -244,6 +242,7 @@ struct Prefs: Codable, Equatable {
         networkWidgets = try c.decodeIfPresent([String].self, forKey: .networkWidgets) ?? d.networkWidgets
         overflow = try c.decodeIfPresent(String.self, forKey: .overflow) ?? d.overflow
         stripLines = Prefs.clampLines(try c.decodeIfPresent(Int.self, forKey: .stripLines) ?? d.stripLines)
+        finderNewWindow = try c.decodeIfPresent(Bool.self, forKey: .finderNewWindow) ?? d.finderNewWindow
     }
 }
 
@@ -254,6 +253,7 @@ final class Store: ObservableObject {
     }
     @Published var prefs: Prefs {
         didSet {
+            FinderOpen.newWindow = prefs.finderNewWindow
             if !loading {
                 schedulePrefsSave()
                 applyWidgetPolicy()
@@ -389,15 +389,21 @@ final class Store: ObservableObject {
     /// 設定の保存はドラッグ中に毎回書かず、少し待ってからまとめて書く。
     private var prefsSaveWork: DispatchWorkItem?
 
-    static let fileURL: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("GroupDock/groups.json")
-    }()
+    /// 保存先のフォルダ。テストでは差し替え、実データに触れない（`ClipboardStore.directoryOverride` と同じ形）。
+    /// 差し替えは `Store()` を作る前に行う。
+    nonisolated(unsafe) static var directoryOverride: URL?
 
-    static let prefsURL = fileURL.deletingLastPathComponent().appendingPathComponent("settings.json")
-    static let keptURL = fileURL.deletingLastPathComponent().appendingPathComponent("kept.json")
-    static let historyURL = fileURL.deletingLastPathComponent().appendingPathComponent("history.json")
-    static let hiddenURL = fileURL.deletingLastPathComponent().appendingPathComponent("hidden.json")
+    static var directory: URL {
+        if let directoryOverride { return directoryOverride }
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("GroupDock", isDirectory: true)
+    }
+
+    static var fileURL: URL { directory.appendingPathComponent("groups.json") }
+    static var prefsURL: URL { directory.appendingPathComponent("settings.json") }
+    static var keptURL: URL { directory.appendingPathComponent("kept.json") }
+    static var historyURL: URL { directory.appendingPathComponent("history.json") }
+    static var hiddenURL: URL { directory.appendingPathComponent("hidden.json") }
 
     /// 設定から、ウィジェットの実行許可を組み立て直す。
     /// ウィジェットの判定タイマーを、いまのウィジェットに合う間隔で張り直す（間隔が変わるときだけ）。
@@ -451,6 +457,7 @@ final class Store: ObservableObject {
         WidgetLibrary.reload()
         groups = Store.load()
         prefs = Store.loadPrefs()
+        FinderOpen.newWindow = prefs.finderNewWindow
         loading = false
         // 初回起動では取り込んだ内容をそのまま保存しておく（init 中は didSet が走らない）。
         if !FileManager.default.fileExists(atPath: Store.fileURL.path) {

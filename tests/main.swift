@@ -2,6 +2,12 @@ import AppKit
 import CryptoKit
 
 // ドラッグ＆ドロップのロジックだけを確かめる（UI は通さない）。
+// 保存先はテスト用のフォルダへ差し替える（実データに触れない）。差し替え先が無ければ、止まる。
+guard let testData = ProcessInfo.processInfo.environment["GROUPDOCK_TEST_DATA"] else {
+    print("FAIL GROUPDOCK_TEST_DATA が無い（実データを書き換えないため、ここで止める）")
+    exit(2)
+}
+Store.directoryOverride = URL(fileURLWithPath: testData, isDirectory: true)
 let store = Store()
 
 // 既存の状態を消して、決まった並びにする。
@@ -613,7 +619,7 @@ do {
         return NowPlayingParse.volumeTarget(for: system) == nil
     }())
 
-    // 再生中のソースに、外部送信・ファイル書き込み・外部プロセス起動の API を入れない（AGENTS.md の条件）。
+    // 再生中のソースに、外部送信・ファイル書き込み・外部プロセス起動の API を入れない（SECURITY.md の「内部 API」の条件）。
     let source = (try? String(contentsOfFile: "Sources/NowPlaying.swift", encoding: .utf8))
         ?? (try? String(contentsOfFile: "../Sources/NowPlaying.swift", encoding: .utf8)) ?? ""
     let forbidden = ["URLSession", "URLRequest", "NWConnection", "FileManager", "createFile", "removeItem", "moveItem",
@@ -1722,11 +1728,11 @@ do {
     check("覚えた機器に向きが付く", known.allSatisfy { $0.direction == .input })
     known = AudioKnown.remembering(known: known, devices: [builtin], direction: .input)
     check("いま無くなった機器も、覚えたまま消さない", known.contains { $0.uid == "AA-BB-CC-DD-EE-FF:input" })
-    let renamed = AudioDeviceInfo(id: 9, uid: "AA-BB-CC-DD-EE-FF:input", name: "ご主人様の AirPods")
+    let renamed = AudioDeviceInfo(id: 9, uid: "AA-BB-CC-DD-EE-FF:input", name: "自分の AirPods")
     known = AudioKnown.remembering(known: known, devices: [renamed], direction: .input)
     check("名前が変わったら更新する（重複させない）",
           known.filter { $0.uid == "AA-BB-CC-DD-EE-FF:input" }.count == 1
-          && known.first { $0.uid == "AA-BB-CC-DD-EE-FF:input" }?.name == "ご主人様の AirPods")
+          && known.first { $0.uid == "AA-BB-CC-DD-EE-FF:input" }?.name == "自分の AirPods")
     let outKnown = AudioKnown.remembering(
         known: known, devices: [AudioDeviceInfo(id: 5, uid: "BuiltInSpeakerDevice", name: "スピーカー")], direction: .output)
     check("出力と入力は別々に覚える", outKnown.filter { $0.direction == .output }.count == 1 && outKnown.filter { $0.direction == .input }.count == 2)
@@ -1915,7 +1921,7 @@ do {
     let smallA = StripPaging.budgets(widgets: 900, apps: 100, available: 600)
     check("アプリが短ければ、その分だけ取り、残りをウィジェットへ", smallA.apps == 100 && smallA.widgets == 500)
 
-    // 実際の帯：ご主人様の設定（左置き・ウィジェット多数）で、大きさを保ったまま収まる。
+    // 実際の帯：左置き・ウィジェット多数の設定で、大きさを保ったまま収まる。
     let pagedStore = Store()
     pagedStore.prefs.position = "left"
     pagedStore.prefs.overflow = "pages"
@@ -2147,6 +2153,37 @@ do {
     check("次のビルド番号は 1 つ増える", AppVersion.nextBuild(current: "36") == 37)
     check("番号ファイルが空・壊れていれば、1 から", AppVersion.nextBuild(current: "") == 1 && AppVersion.nextBuild(current: "abc") == 1)
     check("バージョンは、VERSION と番号をつなぐ", AppVersion.shortVersion(version: "0.2", build: 37) == "0.2.37")
+}
+
+// Finder の開き方：開いているウィンドウがあれば、それを前面に出す（既定）。右クリックで「毎回新しいウィンドウ」にも選べる。
+do {
+    check("既定は、開いているウィンドウを使う", Prefs().finderNewWindow == false)
+    check("古い設定（項目なし）も、開いているウィンドウを使う",
+          (try? JSONDecoder().decode(Prefs.self, from: "{}".data(using: .utf8)!))?.finderNewWindow == false)
+    // 起動中で、ウィンドウがある：前面に出すだけ（新しく開かない）。
+    check("ウィンドウがあれば、既定では前面に出すだけ",
+          FinderOpen.action(hasWindows: true, newWindow: false) == .activateOnly)
+    // 起動中で、ウィンドウが無い：新しく開く。
+    check("ウィンドウが無ければ、新しく開く", FinderOpen.action(hasWindows: false, newWindow: false) == .openNewWindow)
+    // 「新しいウィンドウ」を選んでいるときは、あっても毎回開く。
+    check("新しいウィンドウを選んでいれば、毎回開く", FinderOpen.action(hasWindows: true, newWindow: true) == .openNewWindow)
+    check("右クリックの項目は、いまの選択にチェックが付く",
+          FinderOpen.menuItems(newWindow: false).map(\.checked) == [true, false]
+          && FinderOpen.menuItems(newWindow: true).map(\.checked) == [false, true])
+    check("右クリックの項目の名前", FinderOpen.menuItems(newWindow: false).map(\.title) == ["開いているウィンドウを使う", "毎回新しいウィンドウを開く"])
+    check("項目を選ぶと、設定が決まる", FinderOpen.menuItems(newWindow: false).map(\.newWindow) == [false, true])
+    // どの起動経路でも同じ設定が効く：FinderOpen が現在の設定を持ち、Launcher は呼び出し側に渡させず、これを読む。
+    FinderOpen.newWindow = false
+    check("既定は、開いているウィンドウを使う", FinderOpen.currentAction(hasWindows: true) == .activateOnly)
+    FinderOpen.newWindow = true
+    check("設定を変えると、全経路で毎回新しいウィンドウ", FinderOpen.currentAction(hasWindows: true) == .openNewWindow)
+    FinderOpen.newWindow = false
+    // Store の設定が、FinderOpen に同期される。
+    let finderStore = Store()
+    finderStore.prefs.finderNewWindow = true
+    check("設定を変えると FinderOpen に同期される", FinderOpen.newWindow == true)
+    finderStore.prefs.finderNewWindow = false
+    check("戻すと FinderOpen も戻る", FinderOpen.newWindow == false)
 }
 
 print(failures.isEmpty ? "ALL OK" : "FAILED: \(failures)")

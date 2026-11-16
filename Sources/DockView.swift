@@ -366,7 +366,9 @@ struct RunningTile: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture { if multiple { picking = true } else { Launcher.open(ref) } }
+        .onTapGesture {
+            if multiple { picking = true } else { Launcher.open(ref) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .groupDockDismissPopovers)) { _ in picking = false }
         .popover(isPresented: $picking, arrowEdge: store.popoverEdge) {
             InstancePicker(store: store, ref: ref, size: size, onPick: { picking = false })
@@ -629,7 +631,9 @@ struct AppTile: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         // 複数のインスタンスが動いていれば、選ぶポップアップを出す（帯と同じ）。
-        .onTapGesture { if multiple { picking = true } else { Launcher.open(ref) } }
+        .onTapGesture {
+            if multiple { picking = true } else { Launcher.open(ref) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .groupDockDismissPopovers)) { _ in picking = false }
         .popover(isPresented: $picking, arrowEdge: store.popoverEdge) {
             InstancePicker(store: store, ref: ref, size: size, onPick: { picking = false })
@@ -718,7 +722,9 @@ struct StripAppTile: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         // 複数のインスタンスが動いていれば、選ぶポップアップを出す。1 つなら今までどおり開く。
-        .onTapGesture { if multiple { picking = true } else { Launcher.open(ref) } }
+        .onTapGesture {
+            if multiple { picking = true } else { Launcher.open(ref) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .groupDockDismissPopovers)) { _ in picking = false }
         .popover(isPresented: $picking, arrowEdge: store.popoverEdge) {
             InstancePicker(store: store, ref: ref, size: size, onPick: { picking = false })

@@ -3,7 +3,7 @@ import Foundation
 
 /// 「再生中」ウィジェットの取得・操作・解釈。UI を含まない（テストできる）。
 ///
-/// private framework（MediaRemote）は使わない（AGENTS.md の決めごと）。代わりに、
+/// private framework（MediaRemote）は使わない（SECURITY.md の「内部 API」の例外を除く）。代わりに、
 /// - ミュージック / Spotify は AppleScript で直接聞く。
 /// - ブラウザ（Chrome / Safari）は、開いているタブの再生要素（video / audio）を JavaScript で読み書きする。
 ///   YouTube など、再生要素を持つサイトはこれで扱える。Firefox は AppleScript から JavaScript を実行できないので対象外。
@@ -150,7 +150,7 @@ final class NowPlayingState: ObservableObject {
     @Published var hint: String?
 }
 
-// MARK: - MediaRemote（private framework。条件は AGENTS.md）
+// MARK: - MediaRemote（private framework。条件は SECURITY.md の「内部 API」）
 
 /// macOS が知っている「いま再生中」を、アプリを問わず読む。読み取りと再生操作だけ。
 /// 外部へ送信せず、ファイルも書かない。`dlopen` で実行時に読み、取れなければ nil（呼び出し側が従来の取得に戻す）。

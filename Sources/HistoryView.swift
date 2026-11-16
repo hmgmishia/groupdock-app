@@ -111,7 +111,7 @@ struct HistoryTile: View {
         .contextMenu {
             Text(HistoryInfo.text(ref))
             Divider()
-            Button("起動") { Launcher.open(ref); onPick() }
+            Button("開く") { Launcher.open(ref); onPick() }
             Button("Finder で開く") { Launcher.revealInFinder(ref) }
             Button("パスをコピー") {
                 NSPasteboard.general.clearContents()

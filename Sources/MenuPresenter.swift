@@ -127,3 +127,32 @@ enum TrashMenuSpec {
         return Int(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
+
+/// Finder をクリックしたときの開き方（純粋関数）。既定は、開いているウィンドウを前面に出す。
+/// ウィンドウが無いとき、または「毎回新しいウィンドウ」を選んでいるときは、新しく開く。
+enum FinderOpen {
+    enum Action: Equatable { case activateOnly, openNewWindow }
+
+    /// いまの設定（毎回新しいウィンドウを開くか）。`Store` が設定の変更のたびに同期する。
+    /// 起動の経路（タイル・履歴・引数つき・再起動・まとめて起動）が、呼び出し側に渡させず、これを読む（経路ごとの動きの差を無くす）。
+    nonisolated(unsafe) static var newWindow = false
+
+    static func action(hasWindows: Bool, newWindow: Bool) -> Action {
+        (hasWindows && !newWindow) ? .activateOnly : .openNewWindow
+    }
+
+    /// いまの設定での開き方。
+    static func currentAction(hasWindows: Bool) -> Action { action(hasWindows: hasWindows, newWindow: newWindow) }
+
+    struct Item: Equatable {
+        let title: String
+        let newWindow: Bool
+        let checked: Bool
+    }
+
+    /// 右クリックの項目。いまの選択にチェックが付く。
+    static func menuItems(newWindow: Bool) -> [Item] {
+        [Item(title: "開いているウィンドウを使う", newWindow: false, checked: !newWindow),
+         Item(title: "毎回新しいウィンドウを開く", newWindow: true, checked: newWindow)]
+    }
+}

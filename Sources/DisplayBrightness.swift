@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-/// ディスプレイの明るさ。**private framework（DisplayServices）を使う、条件つきの例外**（条件は AGENTS.md）。
+/// ディスプレイの明るさ。**private framework（DisplayServices）を使う、条件つきの例外**（条件は SECURITY.md の「内部 API」）。
 /// - 実行時に `dlopen` で読み、無ければ「使えない」にする（落ちない）。読み書きするのは明るさだけ。通信・ファイル書き込みはしない。
 /// - 対象の選び方は音量・マイクと同じ（`AudioDevices` を使い回す）。ディスプレイの UID は、抜き差しや再起動をまたいで同じ
 ///   `CGDisplayCreateUUIDFromDisplayID` の UUID。固定したディスプレイが消えても、指す先は変えず「使えない」表示になるだけ。

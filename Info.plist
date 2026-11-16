@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>GroupDock</string>
+	<key>CFBundleDisplayName</key>
+	<string>GroupDock</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.hmgm.GroupDock</string>
+	<key>CFBundleExecutable</key>
+	<string>GroupDock</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>再生中ウィジェットが、ミュージック・Spotify・ブラウザの再生状態を読み、再生・停止・音量を操作するために使います。</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>音量・マイクのウィジェットで、いまつないでいない AirPods などを、固定する機器の候補に出すために、ペアリング済みの機器の名前を読みます。接続や操作はしません。</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>

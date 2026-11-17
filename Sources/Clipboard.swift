@@ -83,6 +83,46 @@ enum ClipboardHistory {
     static func purgingSecrets(_ list: [ClipEntry]) -> [ClipEntry] {
         list.filter { $0.pinned || $0.kind != .text || !ClipboardPolicy.looksSecret($0.text) }
     }
+
+    /// 保存期間を過ぎた項目を除く。固定したものは残す。ちょうど期限のものは残し、1 秒でも過ぎたら消す。
+    static func removingExpired(_ list: [ClipEntry], retention: ClipboardRetention, now: Date = Date()) -> [ClipEntry] {
+        guard let seconds = retention.seconds else { return list }
+        return list.filter { $0.pinned || now.timeIntervalSince($0.date) <= seconds }
+    }
+}
+
+/// 履歴の保存期間（設定）。期限を過ぎた項目は、画像のファイルごと消す。固定したものは消さない。
+enum ClipboardRetention: String, CaseIterable {
+    case forever, hour, day, week, month
+
+    /// 既定は 7 日（無期限にしない。残るほど、秘密が混ざる機会が増える）。
+    static let `default`: ClipboardRetention = .week
+
+    /// 期限（秒）。無期限は nil。
+    var seconds: TimeInterval? {
+        switch self {
+        case .forever: return nil
+        case .hour: return 3600
+        case .day: return 86_400
+        case .week: return 604_800
+        case .month: return 2_592_000
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .forever: return "無期限"
+        case .hour: return "1 時間"
+        case .day: return "1 日"
+        case .week: return "7 日"
+        case .month: return "30 日"
+        }
+    }
+
+    /// 保存してある文字から読み戻す。無い・知らない値は既定に戻す。
+    init(storedRaw: String?) {
+        self = storedRaw.flatMap(ClipboardRetention.init(rawValue:)) ?? .default
+    }
 }
 
 /// 保存してはいけない内容の判定（純粋関数）。
@@ -96,10 +136,22 @@ enum ClipboardPolicy {
     ]
 
     /// コピー元がこれらのアプリなら、印が無くても保存しない（パスワード管理アプリ・キーチェーン）。
+    /// bundle id の前方一致。似た名前の別アプリを巻き込まないよう、組織名まで含めて書く。
     static let secretSourcePrefixes = [
         "com.1password", "com.agilebits", "com.apple.keychainaccess", "com.apple.Passwords",
         "com.bitwarden", "org.keepassxc", "com.lastpass", "com.dashlane", "in.sinew.Enpass", "com.enpass",
+        "ch.protonmail.pass", "me.proton.pass", "com.nordpass", "com.callpod.keepermac", "com.keepersecurity",
+        "com.siber.roboform", "com.stickypassword", "com.zoho.vault",
     ]
+
+    /// クリップボードのポップアップに出す注記。実装（コピー元の除外・秘密に見える内容の除外）と合わせる。1 行 24 文字以内。
+    static let popupNote = """
+        パスワード管理アプリからの
+        コピーと、秘密に見える内容
+        （鍵・トークン・カード番号）は
+        記録しません。見逃すことも
+        あるので、注意してください。
+        """
 
     /// 機密の印があるか、コピー元がパスワード管理アプリなら保存しない。
     static func shouldRecord(types: [String], sourceBundleID: String? = nil) -> Bool {

@@ -34,7 +34,18 @@ struct ClipboardPopup: View {
             }
 
             HStack {
-                Text("パスワード管理アプリなどが「機密」と印を付けた内容は記録しません。")
+                Text("保存期間").font(.caption)
+                Picker("保存期間", selection: $clipboard.retention) {
+                    ForEach(ClipboardRetention.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .help("期間を過ぎた履歴は、画像のファイルごと消えます（固定したものは消えません）")
+                Spacer()
+            }
+
+            HStack {
+                Text(ClipboardPolicy.popupNote)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
